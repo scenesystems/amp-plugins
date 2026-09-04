@@ -4,9 +4,9 @@ Reusable [Amp](https://ampcode.com) plugins, written in [Effect](https://effect.
 [Bun](https://bun.sh). Each plugin bundles to a single directory you can install in Amp directly or copy into your own
 User or Workspace plugin repository.
 
-| Plugin                                       | Status   | What it adds                                                                  |
-| -------------------------------------------- | -------- | ----------------------------------------------------------------------------- |
-| [google-workspace](plugins/google-workspace) | skeleton | Google Drive search, Docs as Markdown, Sheets ranges, comments; bundled skill |
+| Plugin                                       | Status | What it adds                                                                  |
+| -------------------------------------------- | ------ | ----------------------------------------------------------------------------- |
+| [google-workspace](plugins/google-workspace) | ready  | Google Drive search, Docs as Markdown, Sheets ranges, comments; bundled skill |
 
 ## Install a plugin
 
@@ -21,7 +21,7 @@ Amp needs no `bun install` to run them.
 Install the bundled skill once, then ask Amp in any thread:
 
 ```sh
-amp skill add --global scenesystems/amp-plugins/.agents/skills/installing-amp-plugins
+amp skill add --global scenesystems/amp-plugins   # installs every skill under .agents/skills/
 ```
 
 > Install the google-workspace plugin from scenesystems/amp-plugins into our workspace plugins.
