@@ -29,6 +29,7 @@ import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import type * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Schema from "effect/Schema"
+import * as SchemaAST from "effect/SchemaAST"
 import * as ToolError from "./ToolError.ts"
 
 /**
@@ -81,6 +82,12 @@ export const make = <S extends InputSchema, E, R>(tool: Tool<S, E, R>): Tool<S, 
 export const toInputSchema = (schema: Schema.Top): PluginToolDefinition["inputSchema"] => {
   const document = Schema.toJsonSchemaDocument(schema, { referencePolicy: () => undefined })
   const { $schema: _dialect, ...rest } = document.schema as Record<string, unknown>
+  // `Schema.Struct({})` accepts any non-null object and renders as `anyOf: [object, array]`;
+  // a tool without parameters is just an empty object schema.
+  if (SchemaAST.isObjects(schema.ast) && schema.ast.propertySignatures.length === 0) {
+    const { anyOf: _any, ...bare } = rest
+    return { ...bare, type: "object", properties: {} }
+  }
   return { ...rest, type: "object" }
 }
 

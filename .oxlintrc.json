@@ -71,7 +71,7 @@
   "overrides": [
     {
       // Build scripts and tests run outside Amp: console and process.env are fine there.
-      "files": ["scripts/**", "**/test/**", "**/*.test.ts"],
+      "files": ["**/scripts/**", "**/test/**", "**/*.test.ts"],
       "rules": {
         "eslint/no-console": "off",
         "effecttsgo/global-console": "off",
@@ -79,14 +79,17 @@
         "effecttsgo/process-env": "off",
         "effecttsgo/process-env-in-effect": "off",
         "effecttsgo/async-function": "off",
-        "effecttsgo/node-builtin-import": "off"
+        "effecttsgo/node-builtin-import": "off",
+        "effecttsgo/new-promise": "off",
+        "effecttsgo/global-fetch": "off"
       }
     },
     {
-      // Tests stub Amp APIs with partial objects.
+      // Tests stub Amp APIs with partial objects, and each test is its own entry point that provides layers.
       "files": ["**/test/**", "**/*.test.ts"],
       "rules": {
-        "typescript/no-unsafe-type-assertion": "off"
+        "typescript/no-unsafe-type-assertion": "off",
+        "effecttsgo/strict-effect-provide": "off"
       }
     }
   ]

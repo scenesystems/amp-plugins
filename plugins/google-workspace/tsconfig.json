@@ -1,7 +1,7 @@
 {
   "$schema": "../../node_modules/@effect/tsgo/schema.json",
   "extends": "../../tsconfig.base.json",
-  "include": ["src", "test"],
+  "include": ["src", "test", "scripts"],
   "compilerOptions": {
     "tsBuildInfoFile": "../../node_modules/.tsbuildinfo/plugins-google-workspace.tsbuildinfo"
   }

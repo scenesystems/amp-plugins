@@ -35,6 +35,11 @@ describe("Tool.toInputSchema", () => {
     })
     expect(schema).not.toHaveProperty("$schema")
   })
+
+  test("renders a parameterless tool as an empty object schema", () => {
+    const schema = Tool.toInputSchema(Schema.Struct({}))
+    expect(schema).toEqual({ type: "object", properties: {} })
+  })
 })
 
 describe("Tool.toPluginTool", () => {
