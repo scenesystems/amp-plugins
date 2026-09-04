@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Amp orb setup: install dependencies (also runs `effect-tsgo patch` via the prepare script).
+set -euo pipefail
+cd "$(dirname "$0")/.."
+bun install --frozen-lockfile

@@ -1,0 +1,11 @@
+{
+  "$schema": "./node_modules/@effect/tsgo/schema.json",
+  // Solution file: `tsc -b tsconfig.json` type-checks every workspace project below.
+  // Add a reference here whenever you add a package or plugin.
+  "files": [],
+  "references": [
+    { "path": "./scripts" },
+    { "path": "./packages/core" },
+    { "path": "./plugins/google-workspace" }
+  ]
+}

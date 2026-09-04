@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build output (bundled plugins). Published via GitHub Releases and the Amp plugin repos, never committed.
+dist/
+
+# Bun
+.bun/
+*.bun-build
+
+# TypeScript
+*.tsbuildinfo
+
+# Test / coverage
+coverage/
+
+# Local environment and credentials. Never commit Google keys or OAuth tokens.
+.env
+.env.*
+!.env.example
+*.pem
+*-key.json
+service-account*.json
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# Amp scratch space
+.amp/in/
+.amp/portals/

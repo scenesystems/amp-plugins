@@ -1,0 +1,42 @@
+{
+  "$schema": "./node_modules/@effect/tsgo/schema.json",
+  "include": [],
+  "compilerOptions": {
+    // Type-check only. Plugins are bundled with `bun build` (scripts/build.ts); tsc never emits.
+    "noEmit": true,
+    "composite": true,
+    "incremental": true,
+    // Bun runtime: modern JS, bundler-style resolution, `.ts` extensions in relative imports.
+    "target": "ES2022",
+    "lib": ["ESNext"],
+    "module": "Preserve",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force", // Treat every non-declaration file as a module.
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true, // Only transform/eliminate type-only import/export statements.
+    "erasableSyntaxOnly": true, // No enums, namespaces with values, or parameter properties: Bun strips types only.
+    "allowJs": false,
+    "resolveJsonModule": true,
+    // Strictness (mirrors Effect's tsconfig.base.json).
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    // Miscellaneous
+    "skipLibCheck": true, // Skip type checking of third party libraries.
+    "noErrorTruncation": true, // Do not truncate error messages.
+    "types": ["bun"], // Bun globals + Node compat types. No other @types/* are loaded implicitly.
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        // Effect diagnostics are reported by oxlint (type-aware, via oxlint-tsgolint) so they are
+        // not duplicated in the editor. Hover, completions, and quick fixes stay enabled.
+        "diagnostics": false,
+        "namespaceImportPackages": ["effect", "@effect/*"]
+      }
+    ]
+  }
+}

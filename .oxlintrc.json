@@ -1,0 +1,93 @@
+{
+  "$schema": "./node_modules/@effect/tsgo/oxlint-schema.json",
+  // Type-aware Effect rules (effecttsgo/*) come from @effect/tsgo via oxlint-tsgolint.
+  // `bun install` runs `effect-tsgo patch --oxlint` (see package.json "prepare") to wire them in.
+  "extends": ["./node_modules/@effect/tsgo/oxlint-presets/recommended.json"],
+  "plugins": ["typescript", "import", "oxc", "eslint", "unicorn", "node", "effecttsgo"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "error"
+  },
+  "ignorePatterns": ["**/dist", "**/coverage", "**/node_modules", ".amp/**", ".agents/**"],
+  "rules": {
+    // Effect diagnostics that should fail CI rather than warn.
+    "effecttsgo/floating-effect": "error",
+    "effecttsgo/missing-effect-context": "error",
+    "effecttsgo/missing-effect-error": "error",
+    "effecttsgo/missing-layer-context": "error",
+    "effecttsgo/outdated-api": "error",
+    "effecttsgo/unsafe-effect-type-assertion": "error",
+    // Plugins run inside Amp's Bun process; `console` output is not shown to the user. Use amp.logger / Effect.log.
+    "effecttsgo/global-console": "error",
+    "effecttsgo/global-console-in-effect": "error",
+    "effecttsgo/process-env": "error",
+    "effecttsgo/process-env-in-effect": "error",
+    // Native rules tuned to match Effect's own oxlintrc (packages/tools/oxc/oxlintrc.json).
+    "typescript/consistent-type-imports": ["error", { "fixStyle": "inline-type-imports" }],
+    "typescript/no-import-type-side-effects": "error",
+    "import/no-duplicates": "error",
+    "import/no-self-import": "error",
+    "import/no-empty-named-blocks": "error",
+    "typescript/no-unnecessary-type-assertion": "error",
+    "typescript/no-unnecessary-type-constraint": "error",
+    "typescript/no-useless-empty-export": "error",
+    "eslint/no-console": "error",
+    "eslint/no-var": "error",
+    "eslint/no-useless-constructor": "error",
+    "eslint/no-unneeded-ternary": "error",
+    "eslint/no-useless-concat": "error",
+    "unicorn/no-abusive-eslint-disable": "error",
+    "unicorn/prefer-array-flat-map": "error",
+    "unicorn/no-accessor-recursion": "error",
+    "oxc/misrefactored-assign-op": "error",
+    "oxc/no-map-spread": "off",
+    "eslint/no-underscore-dangle": "off", // `_tag` discriminators are idiomatic Effect.
+    "eslint/object-shorthand": "off",
+    "eslint/no-shadow": "off",
+    "eslint/no-unused-vars": "off",
+    "eslint/require-yield": "off",
+    "eslint/no-fallthrough": "off",
+    "eslint/no-await-in-loop": "off",
+    "unicorn/no-new-array": "off",
+    "unicorn/consistent-function-scoping": "off",
+    "unicorn/no-array-sort": "off",
+    "unicorn/no-array-reverse": "off",
+    "unicorn/prefer-set-has": "off",
+    "typescript/no-explicit-any": "off",
+    "typescript/no-empty-interface": "off",
+    "typescript/ban-ts-comment": "off",
+    "typescript/no-namespace": "off",
+    "typescript/no-non-null-assertion": "off",
+    "typescript/no-dynamic-delete": "off",
+    "typescript/no-invalid-void-type": "off",
+    "typescript/no-unsafe-function-type": "off",
+    "typescript/unified-signatures": "off",
+    "typescript/no-empty-object-type": "off",
+    "typescript/no-confusing-non-null-assertion": "off",
+    "typescript/array-type": ["error", { "default": "generic", "readonly": "generic" }],
+    "typescript/no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }]
+  },
+  "overrides": [
+    {
+      // Build scripts and tests run outside Amp: console and process.env are fine there.
+      "files": ["scripts/**", "**/test/**", "**/*.test.ts"],
+      "rules": {
+        "eslint/no-console": "off",
+        "effecttsgo/global-console": "off",
+        "effecttsgo/global-console-in-effect": "off",
+        "effecttsgo/process-env": "off",
+        "effecttsgo/process-env-in-effect": "off",
+        "effecttsgo/async-function": "off",
+        "effecttsgo/node-builtin-import": "off"
+      }
+    },
+    {
+      // Tests stub Amp APIs with partial objects.
+      "files": ["**/test/**", "**/*.test.ts"],
+      "rules": {
+        "typescript/no-unsafe-type-assertion": "off"
+      }
+    }
+  ]
+}

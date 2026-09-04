@@ -1,0 +1,46 @@
+{
+  "name": "@scenesystems/amp-plugins",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Reusable Amp plugins built with Effect and Bun: Google Workspace and more.",
+  "license": "MIT",
+  "homepage": "https://github.com/scenesystems/amp-plugins#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/scenesystems/amp-plugins.git"
+  },
+  "bugs": {
+    "url": "https://github.com/scenesystems/amp-plugins/issues"
+  },
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "plugins/*"
+  ],
+  "engines": {
+    "bun": ">=1.3.0"
+  },
+  "packageManager": "bun@1.3.10",
+  "scripts": {
+    "prepare": "effect-tsgo patch --typescript --oxlint",
+    "check": "tsc -b tsconfig.json",
+    "check:watch": "tsc -b tsconfig.json --watch",
+    "lint": "oxlint --type-aware && dprint check",
+    "lint:fix": "oxlint --type-aware --fix && dprint fmt",
+    "format": "dprint fmt",
+    "test": "bun test",
+    "test:coverage": "bun test --coverage",
+    "build": "bun run scripts/build.ts",
+    "clean": "rm -rf dist node_modules/.tsbuildinfo",
+    "ci": "bun run check && bun run lint && bun run test && bun run build"
+  },
+  "devDependencies": {
+    "@ampcode/plugin": "0.0.0-20260904001652-g2bd7889",
+    "@effect/tsgo": "0.41.0",
+    "@types/bun": "1.4.0",
+    "dprint": "0.57.1",
+    "oxlint": "1.81.0",
+    "oxlint-tsgolint": "7.0.2001",
+    "typescript": "7.0.2"
+  }
+}
