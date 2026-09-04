@@ -22,10 +22,14 @@ scope=${3:?scope required: workspace|user|project|system}
 tag=${4:-latest}
 
 if [[ "$tag" == "latest" ]]; then
-  base="https://github.com/$repo/releases/latest/download"
-else
-  base="https://github.com/$repo/releases/download/$tag"
+  # Resolve the tag so the commit message records what was installed. GitHub redirects
+  # /releases/latest to /releases/tag/<tag>.
+  resolved=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$repo/releases/latest")
+  tag=${resolved##*/releases/tag/}
+  [[ -n "$tag" && "$tag" != "$resolved" ]] || { echo "Could not resolve the latest release of $repo" >&2; exit 1; }
+  echo "Latest release of $repo is $tag"
 fi
+base="https://github.com/$repo/releases/download/$tag"
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
