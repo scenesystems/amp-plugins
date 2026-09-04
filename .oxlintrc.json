@@ -81,7 +81,8 @@
         "effecttsgo/async-function": "off",
         "effecttsgo/node-builtin-import": "off",
         "effecttsgo/new-promise": "off",
-        "effecttsgo/global-fetch": "off"
+        "effecttsgo/global-fetch": "off",
+        "effecttsgo/global-date": "off"
       }
     },
     {

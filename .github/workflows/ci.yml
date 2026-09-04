@@ -13,12 +13,12 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
       # Vitest (unit tests) runs on Node; `.node-version` pins the major that @effect/vitest/utils supports.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
       # Runs `prepare`, which patches tsc/oxlint with the Effect language service (@effect/tsgo).
@@ -28,7 +28,7 @@ jobs:
       - run: bun run test
       # Builds dist/*/, then loads each bundle under Bun (the runtime Amp uses) and checks the bundle invariants.
       - run: bun run test:bundle
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: plugins
           path: dist/
@@ -56,13 +56,13 @@ jobs:
             echo "::notice::GOOGLE_SERVICE_ACCOUNT_KEY is not configured; contract tests not run."
           fi
       - if: steps.creds.outputs.present == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - if: steps.creds.outputs.present == 'true'
         uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
       - if: steps.creds.outputs.present == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
       - if: steps.creds.outputs.present == 'true'
