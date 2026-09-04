@@ -85,11 +85,23 @@
       }
     },
     {
-      // Tests stub Amp APIs with partial objects, and each test is its own entry point that provides layers.
+      // Tests stub Amp APIs with partial objects, each test is its own entry point that provides layers, fixtures are
+      // built as raw JSON on purpose, and untagged errors are injected to prove they are rendered as defects.
       "files": ["**/test/**", "**/*.test.ts"],
       "rules": {
         "typescript/no-unsafe-type-assertion": "off",
-        "effecttsgo/strict-effect-provide": "off"
+        "effecttsgo/strict-effect-provide": "off",
+        "effecttsgo/prefer-schema-over-json": "off",
+        "effecttsgo/global-error-in-effect-failure": "off"
+      }
+    },
+    {
+      // Test fixtures: the fake PluginAPI is a Proxy over a partial object that must be typed as the full interface,
+      // and its disposer mirrors Amp's Promise-based API.
+      "files": ["packages/testing/src/**"],
+      "rules": {
+        "typescript/no-unsafe-type-assertion": "off",
+        "effecttsgo/async-function": "off"
       }
     }
   ]

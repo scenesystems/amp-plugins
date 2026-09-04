@@ -11,8 +11,9 @@ import * as Amp from "./Amp.ts"
 
 /**
  * Creates a runtime for `layer`, which may depend on `Amp`. Layer construction
- * errors are surfaced as defects when the first tool runs, so a misconfigured
- * plugin still loads and reports a readable failure instead of crashing Amp.
+ * errors are turned into defects and surface, rendered by `Tool.toPluginTool`,
+ * when the first tool runs, so a misconfigured plugin still loads and reports a
+ * readable failure instead of crashing Amp.
  *
  * @since 0.1.0
  * @category constructors

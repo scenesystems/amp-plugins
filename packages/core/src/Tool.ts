@@ -27,6 +27,7 @@ import type {
 } from "@ampcode/plugin"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import type * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Schema from "effect/Schema"
 import * as SchemaAST from "effect/SchemaAST"
@@ -56,7 +57,11 @@ export interface Tool<in out S extends InputSchema, out E, out R> {
   readonly transcriptGroup?: PluginToolDefinition["transcriptGroup"] | undefined
   /** Description shown to the LLM. */
   readonly description: string
-  /** Input schema. Its JSON Schema is sent to the LLM; decoding failures are reported as text. */
+  /**
+   * Input schema. Its JSON Schema is sent to the LLM; decoding failures are reported as text.
+   * Use `Schema.Finite` rather than `Schema.Number` for numeric fields: `Schema.Number` admits
+   * `NaN`/`Infinity` and so does not serialise to a plain JSON Schema `number`.
+   */
   readonly input: S
   /** Tool body. Failures are rendered for the agent; defects are reported with their cause. */
   readonly execute: (input: S["Type"], ctx: PluginToolContext) => Effect.Effect<PluginToolResult, E, R>
@@ -111,8 +116,9 @@ export const renderCause = <E>(cause: Cause.Cause<E>): string => {
 /**
  * Converts a `Tool` into a `PluginToolDefinition` that runs on `runtime`.
  *
- * Input is decoded before `execute` runs; decode errors, typed failures, and
- * defects all come back to the agent as text so a tool call never rejects.
+ * Input is decoded before `execute` runs; decode errors, typed failures, defects,
+ * and failures building the runtime's layer all come back to the agent as text so
+ * a tool call never rejects.
  *
  * @since 0.1.0
  * @category conversions
@@ -125,13 +131,14 @@ export const toPluginTool =
       name: tool.name,
       description: tool.description,
       inputSchema: toInputSchema(tool.input),
+      // `runPromiseExit` rather than `runPromise`: building the runtime's layer happens outside the
+      // effect, so a layer failure would otherwise reject the promise instead of reaching `catchCause`.
       execute: (raw, ctx) =>
-        runtime.runPromise(
+        runtime.runPromiseExit(
           Effect.flatMap(decode(raw), (input) => tool.execute(input, ctx)).pipe(
-            Effect.catchCause((cause) => Effect.succeed<PluginToolResult>(renderCause(cause))),
             Effect.withSpan(`tool.${tool.name}`)
           )
-        )
+        ).then((exit) => Exit.isSuccess(exit) ? exit.value : renderCause(exit.cause))
     }
     if (tool.title !== undefined) definition.title = tool.title
     if (tool.transcriptGroup !== undefined) definition.transcriptGroup = tool.transcriptGroup

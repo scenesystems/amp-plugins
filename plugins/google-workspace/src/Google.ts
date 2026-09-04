@@ -79,6 +79,14 @@ export interface Shape {
   ) => Effect.Effect<typeof Model.AppendResult.Type, Error>
   /** Inserts `text` just before the document's trailing newline. */
   readonly appendDocumentText: (documentId: string, text: string) => Effect.Effect<void, Error>
+  /** Creates an empty file (a Google Doc/Sheet when `mimeType` is Google-native) inside `parents`. */
+  readonly createFile: (options: {
+    readonly name: string
+    readonly mimeType: string
+    readonly parents: ReadonlyArray<string>
+  }) => Effect.Effect<Model.DriveFile, Error>
+  /** Permanently deletes a file, bypassing the trash. */
+  readonly deleteFile: (fileId: string) => Effect.Effect<void, Error>
 }
 
 /**
@@ -294,7 +302,19 @@ export const make: Effect.Effect<Shape, never, GoogleAuth | HttpClient.HttpClien
             HttpClientRequest.bodyJsonUnsafe({ requests: [{ insertText: { location: { index }, text: text_ } }] })
           )
         )
-      })
+      }),
+
+    createFile: ({ mimeType, name, parents }) =>
+      json(Model.DriveFile)(
+        HttpClientRequest.post(`${DRIVE}/files`, {
+          urlParams: { fields: Model.FILE_FIELDS, supportsAllDrives: "true" }
+        }).pipe(HttpClientRequest.bodyJsonUnsafe({ name, mimeType, parents }))
+      ),
+
+    deleteFile: (fileId) =>
+      Effect.asVoid(
+        send(HttpClientRequest.delete(`${DRIVE}/files/${encode(fileId)}`, { urlParams: { supportsAllDrives: "true" } }))
+      )
   })
 })
 

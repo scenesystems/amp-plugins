@@ -2,18 +2,20 @@
   "name": "@scenesystems/amp-plugin-testing",
   "version": "0.0.0",
   "private": true,
-  "description": "Effect test helpers for bun:test: it.effect, it.live, it.layer, it.prop on top of effect/testing.",
+  "description": "Shared test fixtures for Amp plugins written in Effect: exact exit assertions, a recording HttpClient stub, and a fake PluginAPI. Runner: @effect/vitest.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
   },
   "scripts": {
-    "check": "tsc -b tsconfig.json",
-    "test": "bun test"
+    "check": "tsc -b tsconfig.json"
   },
   "dependencies": {
+    "@ampcode/plugin": "0.0.0-20260904001652-g2bd7889",
+    "@effect/vitest": "4.0.0-rc.112",
     "effect": "^4.0.0-rc.112"
   }
 }

@@ -26,15 +26,21 @@
       "schedule": ["before 9am on monday"]
     },
     {
-      "description": "Effect 4 release candidates rename APIs between rcs; every bump must arrive as a CI-checked PR.",
-      "matchPackageNames": ["effect"],
+      "description": "Effect 4 release candidates rename APIs between rcs; every bump must arrive as a CI-checked PR. @effect/platform-bun and @effect/vitest are released in lockstep with effect (same rc number) and are pinned exactly, so they must move in the same PR.",
+      "matchPackageNames": ["effect", "@effect/platform-bun", "@effect/vitest"],
       "groupName": "effect",
       "schedule": ["at any time"]
     },
     {
-      "description": "Tooling that is not coupled to anything else.",
-      "matchPackageNames": ["@types/bun", "dprint"],
+      "description": "Tooling that is not coupled to anything else. @types/node tracks the Node major in .node-version.",
+      "matchPackageNames": ["@types/bun", "@types/node", "dprint", "vitest"],
       "groupName": "dev tooling"
+    },
+    {
+      "description": "Node majors are chosen by hand: bump .node-version, engines.node, and @types/node together after checking that @effect/vitest/utils works on the new major (it does not on Node 26).",
+      "matchPackageNames": ["@types/node"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
     }
   ]
 }

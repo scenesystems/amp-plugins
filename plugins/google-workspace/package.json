@@ -9,10 +9,10 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "check": "tsc -b tsconfig.json",
-    "test": "bun test"
+    "check": "tsc -b tsconfig.json"
   },
   "dependencies": {
+    "@effect/platform-bun": "4.0.0-rc.112",
     "@scenesystems/amp-plugin-core": "workspace:*",
     "effect": "^4.0.0-rc.112"
   },

@@ -33,7 +33,7 @@ if (!clientId || !clientSecret) {
   process.exit(1)
 }
 
-const readOnly = Bun.argv.includes("--read-only")
+const readOnly = process.argv.includes("--read-only")
 const scope = readOnly ? SCOPE_READ_ONLY : SCOPE_FULL
 const state = randomBytes(16).toString("hex")
 

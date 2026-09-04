@@ -11,8 +11,7 @@
     "./*": "./src/*.ts"
   },
   "scripts": {
-    "check": "tsc -b tsconfig.json",
-    "test": "bun test"
+    "check": "tsc -b tsconfig.json"
   },
   "dependencies": {
     "effect": "^4.0.0-rc.112"

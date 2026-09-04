@@ -110,19 +110,22 @@ export const driveQuery = (parts: {
   const clauses = [`trashed = ${parts.trashed ? "true" : "false"}`]
   const text = parts.text?.trim()
   if (text) {
-    const escaped = text.replace(/\\/g, "\\\\").replace(/'/g, "\\'")
+    const literal = queryLiteral(text)
     clauses.push(
-      parts.nameOnly ? `name contains '${escaped}'` : `(name contains '${escaped}' or fullText contains '${escaped}')`
+      parts.nameOnly ? `name contains ${literal}` : `(name contains ${literal} or fullText contains ${literal})`
     )
   }
   if (parts.mimeTypes && parts.mimeTypes.length > 0) {
-    clauses.push(`(${parts.mimeTypes.map((m) => `mimeType = '${m}'`).join(" or ")})`)
+    clauses.push(`(${parts.mimeTypes.map((m) => `mimeType = ${queryLiteral(m)}`).join(" or ")})`)
   }
   if (parts.folderId) {
-    clauses.push(`'${parts.folderId.replace(/'/g, "\\'")}' in parents`)
+    clauses.push(`${queryLiteral(parts.folderId)} in parents`)
   }
   return clauses.join(" and ")
 }
+
+/** A single-quoted Drive query literal; backslashes and quotes are backslash-escaped. */
+const queryLiteral = (value: string): string => `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`
 
 /**
  * Human-readable kind for a file's MIME type.

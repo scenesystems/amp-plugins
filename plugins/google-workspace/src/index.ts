@@ -6,7 +6,8 @@
  * @since 0.1.0
  */
 import type { PluginAPI } from "@ampcode/plugin"
-import { Runtime, Tool, ToolError } from "@scenesystems/amp-plugin-core"
+import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
+import { type Amp, Runtime, Tool, ToolError } from "@scenesystems/amp-plugin-core"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
@@ -20,17 +21,25 @@ export const description =
   "Google Drive, Docs, and Sheets tools: search Drive, read Docs as Markdown, read/write Sheet ranges, and review or add comments. Configure via GOOGLE_SERVICE_ACCOUNT_KEY or GOOGLE_OAUTH_* secrets."
 
 /**
- * Services the tools run against: the Google API client over `GoogleAuth` over Effect's fetch client.
+ * Services the tools run against: the Google API client over `GoogleAuth` over Effect's fetch client
+ * and Bun's file system (for `GOOGLE_SERVICE_ACCOUNT_KEY_FILE`).
  *
  * @since 0.1.0
  * @category layers
  */
-export const layer = Google.layer.pipe(
+export const layer: Layer.Layer<Tools.Services, never, Amp.Amp> = Google.layer.pipe(
   Layer.provideMerge(GoogleAuth.layer),
-  Layer.provide(FetchHttpClient.layer)
+  Layer.provide([FetchHttpClient.layer, BunFileSystem.layer])
 )
 
-const checkCredentials = Effect.gen(function*() {
+/**
+ * Body of the `check-credentials` command: the resolved credential and the identity Drive sees,
+ * or the rendered configuration problem. Never fails; every error becomes text for the user.
+ *
+ * @since 0.1.0
+ * @category commands
+ */
+export const checkCredentials: Effect.Effect<string, never, Tools.Services> = Effect.gen(function*() {
   const auth = yield* GoogleAuth.GoogleAuth
   const google = yield* Google.Google
   const credential = yield* auth.credential

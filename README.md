@@ -58,14 +58,17 @@ Tag `main` with `vX.Y.Z` and push the tag. `.github/workflows/release.yml` runs 
 
 ## Develop
 
-Requires Bun ≥ 1.3.
+Requires Bun ≥ 1.3 and Node 24 (`.node-version`; Vitest runs the unit tests on Node).
 
 ```sh
 bun install          # also patches tsc/oxlint with the Effect language service (@effect/tsgo)
 bun run check        # TypeScript 7 (tsgo), all workspace projects
 bun run lint         # oxlint (type-aware Effect rules) + dprint
-bun test
+bun run test         # unit tests (Vitest + @effect/vitest); `bun run test:watch` to iterate
 bun run build        # dist/<plugin>/ for every plugin, or `bun run build google-workspace`
+bun run test:bundle  # build, then load dist/*/index.js under Bun, the runtime Amp uses
+bun run ci           # all of the above, in order
+bun run test:contract  # real Google APIs; needs GOOGLE_SERVICE_ACCOUNT_KEY + GOOGLE_WORKSPACE_CONTRACT_FOLDER
 ```
 
 To try a build inside Amp without installing it, copy `dist/<plugin>/` into `~/.config/amp/plugins/<plugin>/` and run
@@ -75,12 +78,13 @@ To try a build inside Amp without installing it, copy `dist/<plugin>/` into `~/.
 
 ```
 packages/core/            @scenesystems/amp-plugin-core — Effect ↔ Amp Plugin API adapters
-packages/testing/         @scenesystems/amp-plugin-testing — it.effect / it.live / it.layer / it.prop for bun:test
+packages/testing/         @scenesystems/amp-plugin-testing — exact exit assertions, HttpClient stub, fake PluginAPI
 plugins/<name>/           one directory plugin per package
   src/index.ts            plugin entry: `export const description` + default export
   skills/<skill>/SKILL.md bundled Agent Skills (optional)
-  test/                   bun tests
+  test/*.test.ts          unit tests (Vitest); test/support/ fixtures; test/contract/ real-API tests
 scripts/build.ts          bundles plugins/* → dist/*
+scripts/bundle.test.ts    bun:test smoke test of the built bundles
 ```
 
 `packages/core` gives you `Tool.make` (Schema-typed tool input, Effect body, errors rendered for the agent),
@@ -89,22 +93,42 @@ scripts/build.ts          bundles plugins/* → dist/*
 
 ### Testing
 
-Tests run with `bun test`, the same runtime Amp loads plugins into. `@scenesystems/amp-plugin-testing` provides the
-[`@effect/vitest`](https://github.com/Effect-TS/effect-smol/tree/main/packages/vitest) API on top of `bun:test` and the
-runner-agnostic `effect/testing` modules:
+Three layers, each catching a class of regression the others cannot:
+
+| Command                 | Runner                                                                                                     | Proves                                                                                                                                                     |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bun run test`          | Vitest on Node with [`@effect/vitest`](https://github.com/Effect-TS/effect-smol/tree/main/packages/vitest) | Plugin logic against hand-written fakes at the `HttpClient` or `Google` service seam: exact tool output, exact request sequence, exact typed failure.      |
+| `bun run test:contract` | Same, `plugins/*/test/contract/`                                                                           | The fakes' assumptions about Google. Creates and deletes fixtures in a real Drive folder. Fails fast when credentials are missing; never silently skipped. |
+| `bun run test:bundle`   | `bun test` on `dist/*/index.js`                                                                            | The artifact Amp loads: single `description` literal, only Node builtins imported, activation registers every tool, credential errors render under Bun.    |
+
+Unit tests use `it.effect`/`it.live`/`it.layer`/`it.prop` from `@effect/vitest`, assertions from
+`@effect/vitest/utils` (`Assert.deepStrictEqual`, `Assert.assertEquals`, …), and `effect/testing` (`TestClock`,
+`FastCheck`, `TestSchema.Asserts`). `@scenesystems/amp-plugin-testing` adds only what those do not ship: exact
+`Exit` assertions (`ExitAssert.assertFails` proves one typed failure and no defect or interruption), a recording
+`HttpClient` stub, and a fake Amp `PluginAPI` that lets a test call `amp.tool("gdocs_read").execute(input, ctx)` exactly
+the way Amp does.
 
 ```ts
-import { describe, expect, it, TestClock } from "@scenesystems/amp-plugin-testing"
+import * as Assert from "@effect/vitest/utils"
+import { it } from "@effect/vitest"
+import { Assert as ExitAssert, Http } from "@scenesystems/amp-plugin-testing"
 
-it.effect("name", () => Effect.gen(function*() { ... }))   // TestClock (frozen; TestClock.adjust) + TestConsole
-it.live("name", () => ...)                                 // real clock and console
-it.layer(MyLayer)("suite", (it) => { it.effect(...) })     // MyLayer built once per suite, released in afterAll
-it.prop("name", [Schema.String, FastCheck.integer()], ([s, n]) => ...)   // property-based, Schema → arbitrary
+it.effect("401 refreshes the token once", () =>
+  Effect.gen(function*() {
+    const exit = yield* Effect.exit(Google.getFile("abc"))
+    ExitAssert.assertFails(exit, new GoogleApiError({ message: "Invalid Credentials", status: 401, reason: "authError" }))
+    Assert.deepStrictEqual(http.requests.map(Http.endpoint), ["GET https://www.googleapis.com/drive/v3/files/abc", ...])
+  }).pipe(Effect.provide(Layer)))
 ```
 
-Why not `@effect/vitest`? It is thin glue between `effect/testing` and vitest internals, and vitest runs on Node, so
-plugin tests would execute on a different runtime than the plugin. Test failures are rethrown with Effect's pretty
-stack traces so Bun points at the failing line.
+Effect's default `ConfigProvider` snapshots `process.env` on first read and memoises it for the process, so tests
+provide configuration with `ConfigProvider.layer(ConfigProvider.fromEnvRecord({...}))` rather than mutating the
+environment. The same holds in Amp: the plugin sees the environment it was started with (`amp orb restart-processes`
+after changing secrets).
+
+Node is pinned to 24 (`.node-version`): on Node 26, `Assert.deepStrictEqual` failures surface as
+`TypeError: The "message" argument must be one of type string or function` instead of a diff, because
+`@effect/vitest/utils` forwards an undefined message to `node:assert`.
 
 ### Toolchain
 

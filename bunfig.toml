@@ -2,6 +2,6 @@
 # Dependency ranges are set per package in package.json (see README "Dependency versions"); `bun.lock` pins installs.
 
 [test]
-# Test files live next to the code they test (`*.test.ts`) or under `test/`.
-root = "."
-coverageSkipTestFiles = true
+# `bun test` runs only the distribution smoke test, which loads the built bundle under Bun (the runtime Amp uses).
+# Unit and contract tests are Vitest projects (`bun run test`, `bun run test:contract`); see vitest.config.ts.
+root = "scripts"

@@ -1,7 +1,8 @@
 /**
  * Mints and caches Google OAuth2 access tokens for the configured credential.
  *
- * The credential is re-resolved on every mint, so a secrets refresh is picked up without
+ * The credential is re-resolved on every mint from the `ConfigProvider` in effect when the layer
+ * was built (the process environment by default), so a secrets refresh is picked up without
  * reloading the plugin. Tokens are cached until one minute before expiry; concurrent callers
  * share a single mint.
  *
@@ -9,9 +10,11 @@
  */
 import { Amp } from "@scenesystems/amp-plugin-core"
 import * as Clock from "effect/Clock"
+import * as ConfigProvider from "effect/ConfigProvider"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
@@ -54,6 +57,15 @@ interface CachedToken {
 }
 
 const REFRESH_MARGIN_MILLIS = 60_000
+
+/**
+ * Services `make` and `layer` need: Amp for the user's email, an HTTP client for the token
+ * endpoint, and a file system for `GOOGLE_SERVICE_ACCOUNT_KEY_FILE`.
+ *
+ * @since 0.2.0
+ * @category models
+ */
+export type Requirements = Amp.Amp | HttpClient.HttpClient | FileSystem.FileSystem
 
 const configError = (error: { readonly message: string }) =>
   new Credential.CredentialError({ message: `Invalid Google credential configuration: ${error.message}` })
@@ -121,31 +133,46 @@ export const signServiceAccountJwt = (
 const decodeTokenResponse = Schema.decodeUnknownEffect(TokenResponse)
 const decodeTokenError = Schema.decodeUnknownOption(TokenError)
 
-const summarizeTokenError = (body: unknown): string =>
-  Option.match(decodeTokenError(body), {
-    onNone: () => (typeof body === "string" ? body.slice(0, 500) : JSON.stringify(body).slice(0, 500)),
-    onSome: (json) => {
-      const parts = [json.error, json.error_description].filter((p) => p !== undefined && p !== "")
-      return parts.length > 0 ? parts.join(": ") : JSON.stringify(body).slice(0, 500)
-    }
+const parseJson = Option.liftThrowable((text: string): unknown => JSON.parse(text))
+
+/** `error: error_description` from an OAuth error body, else the raw body, else a placeholder. */
+const summarizeTokenError = (text: string): string => {
+  const parts = Option.flatMap(parseJson(text), decodeTokenError).pipe(
+    Option.map((json) => [json.error, json.error_description].filter((p) => p !== undefined && p !== "")),
+    Option.filter((parts) => parts.length > 0)
+  )
+  return Option.match(parts, {
+    onNone: () => text === "" ? "empty response body" : text.slice(0, 500),
+    onSome: (parts) => parts.join(": ")
   })
+}
 
 /**
- * Builds the service from `Amp` (for the current user's email) and an `HttpClient`.
+ * Builds the service from `Amp` (for the current user's email), an `HttpClient`, and the
+ * `FileSystem` used to read key files.
  *
  * @since 0.1.0
  * @category constructors
  */
-export const make: Effect.Effect<Shape, never, Amp.Amp | HttpClient.HttpClient> = Effect.gen(function*() {
+export const make: Effect.Effect<Shape, never, Requirements> = Effect.gen(function*() {
   const amp = yield* Amp.Amp
   const client = yield* HttpClient.HttpClient
+  const fs = yield* FileSystem.FileSystem
+  const configProvider = yield* ConfigProvider.ConfigProvider
   const cache = yield* Ref.make(Option.none<CachedToken>())
   const lock = yield* Semaphore.make(1)
 
+  // Config is read lazily (on every mint) but always from the provider this layer was built with,
+  // not from whatever context the calling tool happens to run in.
+  const withConfig = <A, E>(self: Effect.Effect<A, E>): Effect.Effect<A, E> =>
+    Effect.provideService(self, ConfigProvider.ConfigProvider, configProvider)
+
   const ampUserEmail = Option.fromNullishOr(amp.system.user?.email)
-  const credential = Credential.resolve({ ampUserEmail })
-  const scope = Effect.mapError(Credential.scope, configError)
-  const readOnly = Effect.mapError(Credential.readOnly, configError)
+  const credential = withConfig(
+    Effect.provideService(Credential.resolve({ ampUserEmail }), FileSystem.FileSystem, fs)
+  )
+  const scope = withConfig(Effect.mapError(Credential.scope, configError))
+  const readOnly = withConfig(Effect.mapError(Credential.readOnly, configError))
 
   const mint: Effect.Effect<CachedToken, Credential.CredentialError> = Effect.gen(function*() {
     const cred = yield* credential
@@ -170,18 +197,18 @@ export const make: Effect.Effect<Shape, never, Amp.Amp | HttpClient.HttpClient> 
         })
       )
     )
-    const body = yield* response.json.pipe(Effect.orElseSucceed(() => null))
+    const text = yield* response.text.pipe(Effect.orElseSucceed(() => ""))
     if (response.status < 200 || response.status >= 300) {
       return yield* new Credential.CredentialError({
         message: `Google token request failed (${response.status}) for ${Credential.describe(cred)}: ${
-          summarizeTokenError(body)
+          summarizeTokenError(text)
         }`,
         hint: cred._tag === "ServiceAccount"
           ? "Check that the key is current and, when impersonating, that domain-wide delegation grants this exact scope."
           : "The refresh token may be revoked; re-run the OAuth setup script."
       })
     }
-    const token = yield* decodeTokenResponse(body).pipe(
+    const token = yield* decodeTokenResponse(Option.getOrNull(parseJson(text))).pipe(
       Effect.mapError(() =>
         new Credential.CredentialError({ message: "Google token response did not include an access_token." })
       )
@@ -218,4 +245,4 @@ export const make: Effect.Effect<Shape, never, Amp.Amp | HttpClient.HttpClient> 
  * @since 0.1.0
  * @category layers
  */
-export const layer: Layer.Layer<GoogleAuth, never, Amp.Amp | HttpClient.HttpClient> = Layer.effect(GoogleAuth)(make)
+export const layer: Layer.Layer<GoogleAuth, never, Requirements> = Layer.effect(GoogleAuth)(make)

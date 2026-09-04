@@ -1,39 +1,59 @@
 # AGENTS.md
 
-Bun workspace of Amp plugins written in Effect 4. Read `README.md` for layout and install instructions.
+Reusable Amp plugins written in Effect 4, built with Bun, shipped as self-contained bundles. `README.md` has the
+layout, commands, install flow, and dependency policy; this file is the mental model behind them.
 
-## Commands
+## Shape
 
-- `bun install` — installs and runs `effect-tsgo patch` (required; never skip the `prepare` script).
-- `bun run check` — `tsc -b tsconfig.json` (TypeScript 7 / tsgo). Add new packages to the root `tsconfig.json` references.
-- `bun run lint` / `bun run lint:fix` — oxlint (type-aware, Effect rules) then dprint.
-- `bun test` — Bun's test runner. Tests live in `test/*.test.ts` next to `src/`. Write Effect tests with
-  `it.effect`/`it.live`/`it.layer`/`it.prop` from `@scenesystems/amp-plugin-testing` (`packages/testing`), not with
-  hand-rolled `Effect.runPromise`; use plain `test` only for Promise-returning boundaries such as `PluginToolDefinition.execute`.
-- `bun run build [name]` — bundles `plugins/*` to `dist/<name>/`. Run after changing a plugin entry point.
-- `bun run ci` — everything above, in order. Run before committing.
+Three kinds of package, one direction of dependency:
 
-## Conventions
+- `packages/core` adapts the Amp Plugin API to Effect: a tool is a `Schema` input plus an Effect body, a plugin is a
+  `Layer` turned into a `ManagedRuntime` that lives as long as the plugin. Everything a plugin needs from Amp comes
+  through services, not globals.
+- `plugins/<name>` is one integration each. Inside a plugin the layers are: credentials → auth → a service that speaks
+  the remote API → tools that render results for an agent → an entry file that wires the layer. Each layer is a
+  service with a typed error, so every fault has a name and a place to be handled.
+- `packages/testing` holds fixtures shared across plugins (exact `Exit` assertions, a recording `HttpClient`, a fake
+  `PluginAPI`). It is not a runner and has no tests of its own; every consumer exercises it.
 
-- Effect 4 (`effect@4.0.0-rc.x`). Import modules by path (`import * as Effect from "effect/Effect"`), never the barrel.
-  The API differs from Effect 3: `Context.Service` (not `Context.Tag`/`Effect.Service`), `Layer.effect(Key)(effect)`,
-  `Effect.catchCause`, `Schema.decodeUnknownEffect`, `Schema.toJsonSchemaDocument`. Check `node_modules/effect/dist/*.d.ts`
-  when unsure; do not rely on Effect 3 memory.
-- Tools are `Tool.make({...})` from `@scenesystems/amp-plugin-core` with a `Schema.Struct` input and an Effect body.
-  Use `Schema.Finite` (not `Schema.Number`) for numeric tool inputs so the JSON Schema stays a plain `number`.
-  Fail with `ToolError` (message + hint) for anything the agent should read and act on.
-- Plugin entry files must keep `export const description = "…"` as a static string literal ≤ 300 characters; the build
-  script rewrites the bundle to preserve it and fails if it cannot.
-- Plugins run inside Amp's Bun process with no `node_modules`: everything must be bundled, so do not add runtime
-  dependencies that cannot be inlined by `bun build`. `@ampcode/plugin` is types-only; use `import type`.
-- Read configuration via `Config`/`Redacted` in Effect code; `process.env` is a lint error outside `scripts/` and tests.
-  Log via `Amp.log` or `Effect.log`; `console` is a lint error in plugin code.
-- Formatting is dprint (Effect style: no semicolons, double quotes, no trailing commas, 120 columns). Run
-  `bun run format` instead of hand-formatting.
-- Dependency versions follow README "Dependency versions": `effect`, `@types/bun`, `dprint` use `^` ranges;
-  `@ampcode/plugin` and the toolchain (`typescript`, `oxlint`, `oxlint-tsgolint`, `@effect/tsgo`) are exact. Bump the
-  toolchain together to versions on `@effect/tsgo`'s support table (`bun install` fails otherwise). Never write
-  `@ampcode/plugin` as a range: it resolves to the stale `0.0.0-dev`. Renovate (`renovate.json`) opens upgrade PRs.
-- Effect 4 renames between release candidates (e.g. `Effect.fork` → `Effect.forkChild`, `ServiceMap` → `Context`).
-  After an `effect` bump, fix `bun run check` errors by reading the new `.d.ts`, not by pinning back.
-- Never commit `dist/`, credentials, or `.env` files. Google credentials come from Amp secrets as environment variables.
+Plugins run inside Amp's Bun process with no `node_modules`, so a plugin's runtime is exactly its bundle: inline what
+you use, keep `@ampcode/plugin` type-only, and keep the entry file's `description` a static literal the build can find.
+The agent reads tool output and errors, so those strings are the product: they are contracts, not logging.
+
+## How we work
+
+- Effect 4, not Effect 3. Import modules by path and read the installed `.d.ts` when an API name is uncertain;
+  memory of v3 (and of earlier release candidates) is wrong often enough to be a liability. After a bump, fix the code
+  forward, never pin back.
+- Effects are explicit. Configuration is `Config`/`Redacted`, IO is a service (`HttpClient`, `FileSystem`, `Clock`),
+  logging goes through Amp. Anything a plugin reaches for directly (`process.env`, `console`, `Bun.*`) is both a lint
+  error and a sign the code cannot be tested at the seam it should be.
+- `bun run ci` is the definition of done: types, lint, formatting, unit tests, build, and the bundle smoke test.
+  Formatting and lint fixes are automated (`bun run lint:fix`); do not hand-format.
+- Dependencies are deliberate. Ranges say what we accept, the lockfile says what we tested, and Renovate turns the gap
+  into CI-checked PRs. Things that must move together (the Effect family, the tsgo toolchain) are grouped; things with
+  odd publishing (`@ampcode/plugin`) are pinned. README "Dependency versions" records the reasoning per package.
+
+## How we test
+
+A test states a contract and fails whenever that contract changes. Three layers, each catching what the others cannot:
+
+- Unit tests (`bun run test`, `@effect/vitest`) run plugin logic against a hand-written fake placed at a real seam,
+  either the `HttpClient` when the wire protocol is under test or the plugin's own API service when the tool is. They
+  assert whole values: the full rendered output, the full request sequence, the exact typed error via `Effect.exit`.
+  Substring matches, guarded assertions that may not run, and `Effect.flip` (which hides defects and interruptions) are
+  not proofs. Pure functions and schemas get property tests.
+- Contract tests (`bun run test:contract`) run the same code against the real remote API with real credentials, so the
+  fakes stay honest. They fail fast without credentials rather than skipping.
+- The bundle smoke test (`bun run test:bundle`) loads what we actually ship under Bun. It is the one place a
+  distribution check belongs, and it is labelled as such.
+
+When a test is hard to write, the seam is in the wrong place; fix the code rather than the test. Never write tests
+about the test fixtures themselves.
+
+## Adding a plugin
+
+Copy the shape of `plugins/google-workspace`: credential and auth services with typed errors, one API service that
+owns HTTP and error mapping, tools built with `Tool.make`, a skill that teaches the agent when to use them, tests at
+each seam, and a contract suite gated on that integration's credentials. Register the package in the root
+`tsconfig.json` and add its credential secrets to the CI contract job.

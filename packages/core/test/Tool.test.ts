@@ -1,149 +1,203 @@
-import type { PluginAPI, PluginToolContext, PluginToolDefinition } from "@ampcode/plugin"
-import { describe, expect, it, test } from "@scenesystems/amp-plugin-testing"
-import * as Context from "effect/Context"
+import { describe, it } from "@effect/vitest"
+import * as Assert from "@effect/vitest/utils"
+import { Assert as ExitAssert, PluginApi } from "@scenesystems/amp-plugin-testing"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Schema from "effect/Schema"
-import * as Amp from "../src/Amp.ts"
-import * as Runtime from "../src/Runtime.ts"
 import * as Tool from "../src/Tool.ts"
 import { ToolError } from "../src/ToolError.ts"
 
-const ctx = {} as PluginToolContext
 const runtime = ManagedRuntime.make(Layer.empty)
+const ctx = PluginApi.make().toolContext
 
 const Echo = Tool.make({
   name: "echo",
   title: "Echo",
+  transcriptGroup: { active: "Echoing", complete: "Echoed" },
   description: "Echo the message back, optionally repeated",
   input: Schema.Struct({
     message: Schema.String.annotate({ description: "Text to echo" }),
-    times: Schema.optionalKey(Schema.Finite)
+    times: Schema.optionalKey(Schema.Finite).annotate({ description: "Repetitions" })
   }),
   execute: ({ message, times }) => Effect.succeed(message.repeat(times ?? 1))
 })
 
+const tool = <S extends Tool.InputSchema, E>(definition: Tool.Tool<S, E, never>) =>
+  Tool.toPluginTool(runtime)(definition)
+
+const run = (definition: Tool.Tool<any, any, never>, input: Record<string, unknown>) =>
+  Effect.promise(() => tool(definition).execute(input, ctx))
+
 describe("Tool.toInputSchema", () => {
-  test("produces an object JSON Schema with properties and required", () => {
-    const schema = Tool.toInputSchema(Echo.input)
-    expect(schema.type).toBe("object")
-    expect(schema.required).toEqual(["message"])
-    expect(schema.properties).toMatchObject({
-      message: { type: "string", description: "Text to echo" },
-      times: { type: "number" }
+  it("renders a struct as a self-contained object schema without a dialect", () => {
+    Assert.deepStrictEqual(Tool.toInputSchema(Echo.input), {
+      type: "object",
+      properties: {
+        message: { type: "string", description: "Text to echo" },
+        times: { type: "number", description: "Repetitions" }
+      },
+      required: ["message"],
+      additionalProperties: false
     })
-    expect(schema).not.toHaveProperty("$schema")
   })
 
-  test("renders a parameterless tool as an empty object schema", () => {
-    const schema = Tool.toInputSchema(Schema.Struct({}))
-    expect(schema).toEqual({ type: "object", properties: {} })
+  it("renders a parameterless tool as an empty object schema", () => {
+    Assert.deepStrictEqual(Tool.toInputSchema(Schema.Struct({})), { type: "object", properties: {} })
+  })
+
+  it("inlines named schemas instead of emitting $defs", () => {
+    class Named extends Schema.Class<Named>("Named")({ id: Schema.String }) {}
+    const schema = Tool.toInputSchema(Schema.Struct({ item: Named }))
+    Assert.deepStrictEqual(Object.keys(schema).sort(), ["additionalProperties", "properties", "required", "type"])
+    Assert.deepStrictEqual(schema.properties, {
+      item: {
+        type: "object",
+        properties: { id: { type: "string" } },
+        required: ["id"],
+        additionalProperties: false
+      }
+    })
   })
 })
 
 describe("Tool.toPluginTool", () => {
-  const definition = Tool.toPluginTool(runtime)(Echo)
-
-  test("copies metadata", () => {
-    expect(definition.name).toBe("echo")
-    expect(definition.title).toBe("Echo")
-    expect(definition.description).toBe(Echo.description)
-  })
-
-  test("decodes input and runs the effect", async () => {
-    expect(await definition.execute({ message: "ab", times: 2 }, ctx)).toBe("abab")
-  })
-
-  test("reports decode failures as text instead of rejecting", async () => {
-    const result = await definition.execute({ message: 42 }, ctx)
-    expect(typeof result).toBe("string")
-    expect(result).toStartWith("SchemaError:")
-    expect(result).toContain("string")
-  })
-
-  test("renders ToolError with its hint", async () => {
-    const Failing = Tool.make({
-      name: "failing",
-      description: "Always fails",
-      input: Schema.Struct({}),
-      execute: () => new ToolError({ message: "no credentials", hint: "set GOOGLE_SERVICE_ACCOUNT_KEY" })
-    })
-    expect(await Tool.toPluginTool(runtime)(Failing).execute({}, ctx)).toBe(
-      "Error: no credentials\nHint: set GOOGLE_SERVICE_ACCOUNT_KEY"
+  it("copies name, title, transcript group, description, and schema", () => {
+    const definition = tool(Echo)
+    Assert.deepStrictEqual(
+      { ...definition, execute: undefined },
+      {
+        name: "echo",
+        title: "Echo",
+        transcriptGroup: { active: "Echoing", complete: "Echoed" },
+        description: "Echo the message back, optionally repeated",
+        inputSchema: Tool.toInputSchema(Echo.input),
+        execute: undefined
+      }
     )
   })
 
-  test("renders defects with the pretty cause", async () => {
-    const Dying = Tool.make({
-      name: "dying",
-      description: "Throws",
+  it("omits title and transcriptGroup when the tool has none", () => {
+    const Bare = Tool.make({
+      name: "bare",
+      description: "Bare",
       input: Schema.Struct({}),
-      execute: () =>
-        Effect.sync(() => {
-          throw new Error("kaboom")
-        })
+      execute: () => Effect.succeed("")
     })
-    const result = await Tool.toPluginTool(runtime)(Dying).execute({}, ctx)
-    expect(result).toStartWith("Tool failed unexpectedly:")
-    expect(result).toContain("kaboom")
+    const definition = tool(Bare)
+    Assert.deepStrictEqual(Object.keys(definition).sort(), ["description", "execute", "inputSchema", "name"])
   })
-})
 
-describe("Tool.make", () => {
-  it.effect("execute is a plain Effect that can run under the test environment", () =>
+  it.effect("decodes input and runs the effect", () =>
     Effect.gen(function*() {
-      expect(yield* Echo.execute({ message: "hi", times: 3 }, ctx)).toBe("hihihi")
+      Assert.strictEqual(yield* run(Echo, { message: "ab", times: 2 }), "abab")
+      Assert.strictEqual(yield* run(Echo, { message: "ab" }), "ab")
+    }))
+
+  it.effect("reports each kind of decode failure as text instead of rejecting", () =>
+    Effect.gen(function*() {
+      Assert.strictEqual(yield* run(Echo, { message: 42 }), "SchemaError: Expected string\n  at [\"message\"]")
+      Assert.strictEqual(yield* run(Echo, {}), "SchemaError: Missing key\n  at [\"message\"]")
+      Assert.strictEqual(
+        yield* run(Echo, { message: "x", times: "2" }),
+        "SchemaError: Expected number\n  at [\"times\"]"
+      )
+    }))
+
+  it.effect("renders a ToolError with and without its hint", () =>
+    Effect.gen(function*() {
+      const failing = (hint: string | undefined) =>
+        Tool.make({
+          name: "failing",
+          description: "Always fails",
+          input: Schema.Struct({}),
+          execute: () => new ToolError({ message: "no credentials", hint })
+        })
+      Assert.strictEqual(
+        yield* run(failing("set GOOGLE_SERVICE_ACCOUNT_KEY"), {}),
+        "Error: no credentials\nHint: set GOOGLE_SERVICE_ACCOUNT_KEY"
+      )
+      Assert.strictEqual(yield* run(failing(undefined), {}), "Error: no credentials")
+    }))
+
+  it.effect("renders defects with the pretty cause, keeping the defect's message and stack", () =>
+    Effect.gen(function*() {
+      const Dying = Tool.make({
+        name: "dying",
+        description: "Throws",
+        input: Schema.Struct({}),
+        execute: () =>
+          Effect.sync(() => {
+            throw new Error("kaboom")
+          })
+      })
+      const result = yield* run(Dying, {})
+      Assert.assertTrue(typeof result === "string")
+      Assert.assertMatch(result, /^Tool failed unexpectedly:\nError: kaboom\n {4}at /)
+    }))
+
+  it.effect("never rejects: the promise resolves even for a defect", () =>
+    Effect.gen(function*() {
+      const exit = yield* Effect.exit(run(
+        Tool.make({ name: "d", description: "d", input: Schema.Struct({}), execute: () => Effect.die("x") }),
+        {}
+      ))
+      Assert.assertTrue(exit._tag === "Success")
     }))
 })
 
-/** A fake `PluginAPI` that records registrations, dispose callbacks, and log calls. */
-const makeFakeApi = () => {
-  const registered: Array<PluginToolDefinition> = []
-  const disposers: Array<() => void | Promise<void>> = []
-  const logs: Array<unknown> = []
-  const api = {
-    logger: { log: (...args: Array<unknown>) => logs.push(args) },
-    registerTool: (definition: PluginToolDefinition) => {
-      registered.push(definition)
-      return { unsubscribe: () => {} }
-    },
-    onDispose: (callback: () => void | Promise<void>) => {
-      disposers.push(callback)
-      return { unsubscribe: () => {} }
-    }
-  } as unknown as PluginAPI
-  return { api, registered, disposers, logs }
-}
+describe("Tool.renderCause", () => {
+  it("renders typed failures tersely and everything else with the full cause", () => {
+    Assert.strictEqual(Tool.renderCause(Cause.fail(new ToolError({ message: "m", hint: "h" }))), "Error: m\nHint: h")
+    Assert.strictEqual(Tool.renderCause(Cause.fail(new Error("plain error"))), "Error: plain error")
+    Assert.strictEqual(Tool.renderCause(Cause.fail({ _tag: "Custom", message: "objecty" })), "Custom: objecty")
+    Assert.strictEqual(Tool.renderCause(Cause.fail({ message: "untagged" })), "Error: untagged")
+    Assert.assertMatch(
+      Tool.renderCause(Cause.fail("plain string")),
+      /^Tool failed unexpectedly:\nError: plain string\n/
+    )
+    Assert.assertMatch(Tool.renderCause(Cause.die("boom")), /^Tool failed unexpectedly:\nError: boom\n/)
+    Assert.assertMatch(Tool.renderCause(Cause.interrupt()), /^Tool failed unexpectedly:\nInterruptError: /)
+  })
 
-describe("Runtime.make + Tool.registerAll", () => {
-  it.live("provides Amp to tools and disposes on plugin dispose", () =>
+  it("prefers the first renderable typed failure when a cause has several reasons", () => {
+    const cause = Cause.combine(Cause.die("boom"), Cause.fail(new ToolError({ message: "typed" })))
+    Assert.strictEqual(Tool.renderCause(cause), "Error: typed")
+  })
+})
+
+describe("Tool.registerAll", () => {
+  it.effect("registers every tool in order and unsubscribes all of them at once", () =>
     Effect.gen(function*() {
-      const { api, disposers, logs, registered } = makeFakeApi()
-
-      class Greeting extends Context.Service<Greeting, { readonly prefix: string }>()("Greeting", {
-        make: Effect.map(Amp.Amp, (amp) => ({ prefix: typeof amp.logger.log === "function" ? "hello" : "?" }))
-      }) {}
-
-      const Greet = Tool.make({
-        name: "greet",
-        description: "Greets",
-        input: Schema.Struct({ name: Schema.String }),
-        execute: ({ name }) =>
-          Effect.gen(function*() {
-            const { prefix } = yield* Greeting
-            yield* Amp.log("greeting", name)
-            return `${prefix} ${name}`
-          })
+      const fake = PluginApi.make()
+      const Second = Tool.make({
+        name: "second",
+        description: "2",
+        input: Schema.Struct({}),
+        execute: () => Effect.succeed("")
       })
+      const subscription = Tool.registerAll(fake.api, runtime, [Echo, Second])
+      Assert.deepStrictEqual(fake.tools.map((t) => t.name), ["echo", "second"])
+      Assert.strictEqual(
+        yield* Effect.promise(() => fake.tool("echo").execute({ message: "hi" }, fake.toolContext)),
+        "hi"
+      )
+      subscription.unsubscribe()
+      Assert.deepStrictEqual(fake.tools, [])
+    }))
+})
 
-      const runtime = Runtime.make(api, Layer.effect(Greeting)(Greeting.make))
-      Tool.registerAll(api, runtime, [Greet])
-
-      expect(registered.map((d) => d.name)).toEqual(["greet"])
-      expect(yield* Effect.promise(() => registered[0]!.execute({ name: "ari" }, ctx))).toBe("hello ari")
-      expect(logs).toEqual([["greeting", "ari"]])
-      expect(disposers).toHaveLength(1)
-      yield* Effect.promise(async () => disposers[0]!())
+describe("Tool.make", () => {
+  it.effect("execute is a plain Effect whose failure is observable as a typed failure", () =>
+    Effect.gen(function*() {
+      Assert.strictEqual(yield* Echo.execute({ message: "hi", times: 3 }, ctx), "hihihi")
+      const Failing = Tool.make({
+        name: "f",
+        description: "f",
+        input: Schema.Struct({}),
+        execute: () => new ToolError({ message: "typed" })
+      })
+      ExitAssert.assertFails(yield* Effect.exit(Failing.execute({}, ctx)), new ToolError({ message: "typed" }))
     }))
 })

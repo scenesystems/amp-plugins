@@ -1,8 +1,9 @@
 {
   "$schema": "../node_modules/@effect/tsgo/schema.json",
   "extends": "../tsconfig.base.json",
-  "include": ["*.ts"],
+  "include": ["*.ts", "../vitest.config.ts"],
   "compilerOptions": {
+    "types": ["bun"], // Build and bundle-smoke scripts run under Bun.
     "tsBuildInfoFile": "../node_modules/.tsbuildinfo/scripts.tsbuildinfo"
   }
 }

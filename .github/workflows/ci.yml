@@ -17,14 +17,55 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
+      # Vitest (unit tests) runs on Node; `.node-version` pins the major that @effect/vitest/utils supports.
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
       # Runs `prepare`, which patches tsc/oxlint with the Effect language service (@effect/tsgo).
       - run: bun install --frozen-lockfile
       - run: bun run check
       - run: bun run lint
-      - run: bun test
-      - run: bun run build
+      - run: bun run test
+      # Builds dist/*/, then loads each bundle under Bun (the runtime Amp uses) and checks the bundle invariants.
+      - run: bun run test:bundle
       - uses: actions/upload-artifact@v4
         with:
           name: plugins
           path: dist/
           if-no-files-found: error
+
+  # Runs the plugins against the real Google APIs. Needs repository secrets:
+  #   GOOGLE_SERVICE_ACCOUNT_KEY        service-account JSON (the same value the plugin reads in Amp)
+  #   GOOGLE_WORKSPACE_CONTRACT_FOLDER  Drive folder ID shared with that account; fixtures are created and deleted there
+  # Skipped when the key secret is absent (forks, dependency PRs). The suite itself fails fast if either variable is
+  # missing, so it is never silently green.
+  contract:
+    runs-on: ubuntu-latest
+    needs: verify
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    env:
+      GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+      GOOGLE_WORKSPACE_CONTRACT_FOLDER: ${{ secrets.GOOGLE_WORKSPACE_CONTRACT_FOLDER }}
+    steps:
+      - name: Check for credentials
+        id: creds
+        run: |
+          if [ -n "$GOOGLE_SERVICE_ACCOUNT_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::GOOGLE_SERVICE_ACCOUNT_KEY is not configured; contract tests not run."
+          fi
+      - if: steps.creds.outputs.present == 'true'
+        uses: actions/checkout@v4
+      - if: steps.creds.outputs.present == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - if: steps.creds.outputs.present == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - if: steps.creds.outputs.present == 'true'
+        run: bun install --frozen-lockfile
+      - if: steps.creds.outputs.present == 'true'
+        run: bun run test:contract

@@ -18,7 +18,8 @@
     "plugins/*"
   ],
   "engines": {
-    "bun": ">=1.3.0"
+    "bun": ">=1.3.0",
+    "node": ">=24 <26"
   },
   "packageManager": "bun@1.3.10",
   "scripts": {
@@ -28,19 +29,25 @@
     "lint": "oxlint --type-aware && dprint check",
     "lint:fix": "oxlint --type-aware --fix && dprint fmt",
     "format": "dprint fmt",
-    "test": "bun test",
-    "test:coverage": "bun test --coverage",
+    "test": "vitest run --project unit",
+    "test:watch": "vitest --project unit",
+    "test:contract": "vitest run --project contract",
+    "test:bundle": "bun run build && bun test",
     "build": "bun run scripts/build.ts",
     "clean": "rm -rf dist node_modules/.tsbuildinfo",
-    "ci": "bun run check && bun run lint && bun run test && bun run build"
+    "ci": "bun run check && bun run lint && bun run test && bun run test:bundle"
   },
   "devDependencies": {
     "@ampcode/plugin": "0.0.0-20260904001652-g2bd7889",
     "@effect/tsgo": "0.41.0",
+    "@effect/vitest": "4.0.0-rc.112",
+    "@scenesystems/amp-plugin-testing": "workspace:*",
     "@types/bun": "^1.4.0",
+    "@types/node": "^24.0.0",
     "dprint": "^0.57.1",
     "oxlint": "1.81.0",
     "oxlint-tsgolint": "7.0.2001",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "vitest": "^4.1.0"
   }
 }

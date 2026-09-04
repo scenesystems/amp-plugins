@@ -23,6 +23,7 @@
 import * as Config from "effect/Config"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
@@ -114,14 +115,35 @@ export const identity = (credential: Credential): string =>
     ? "the OAuth user"
     : Option.getOrElse(credential.subject, () => credential.clientEmail)
 
+const optionalString = (name: string) =>
+  Config.string(name).pipe(
+    Config.map((s) => s.trim()),
+    Config.option,
+    Config.map(Option.filter((s) => s !== ""))
+  )
+
+const READ_ONLY = "GOOGLE_WORKSPACE_READ_ONLY"
+// Decoded through a struct so a bad value reports the variable name, like `Config.boolean` does.
+const decodeFlag = Schema.decodeUnknownEffect(Schema.Struct({ [READ_ONLY]: Config.Boolean }))
+
 /**
- * Whether `GOOGLE_WORKSPACE_READ_ONLY` is set to a truthy value.
+ * Whether `GOOGLE_WORKSPACE_READ_ONLY` is set to a truthy value (`true`, `yes`, `on`, `1`, `y`).
+ * Unset or blank means `false`; any other value is a configuration error.
  *
  * @since 0.1.0
  * @category config
  */
-export const readOnly: Config.Config<boolean> = Config.boolean("GOOGLE_WORKSPACE_READ_ONLY").pipe(
-  Config.withDefault(false)
+export const readOnly: Config.Config<boolean> = optionalString(READ_ONLY).pipe(
+  Config.mapOrFail(
+    Option.match({
+      onNone: () => Effect.succeed(false),
+      onSome: (flag) =>
+        decodeFlag({ [READ_ONLY]: flag }).pipe(
+          Effect.map((decoded) => decoded[READ_ONLY]),
+          Effect.mapError((issue) => new Config.ConfigError(issue))
+        )
+    })
+  )
 )
 
 /**
@@ -131,13 +153,6 @@ export const readOnly: Config.Config<boolean> = Config.boolean("GOOGLE_WORKSPACE
  * @category config
  */
 export const scope: Config.Config<string> = Config.map(readOnly, (ro) => ro ? SCOPE_READ_ONLY : SCOPE_FULL)
-
-const optionalString = (name: string) =>
-  Config.string(name).pipe(
-    Config.map((s) => s.trim()),
-    Config.option,
-    Config.map(Option.filter((s) => s !== ""))
-  )
 
 const optionalRedacted = (name: string) =>
   Config.redacted(name).pipe(
@@ -171,16 +186,13 @@ const serviceAccountEnv = Config.all({
 const configError = (error: { readonly message: string }) =>
   new CredentialError({ message: `Invalid Google credential configuration: ${error.message}`, hint: SETUP_HINT })
 
-const readKeyFile = (path: string): Effect.Effect<Redacted.Redacted, CredentialError> =>
-  Effect.tryPromise({
-    try: () => Bun.file(path).text(),
-    catch: (error) =>
-      new CredentialError({
-        message: `Cannot read service account key file ${path}: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      })
-  }).pipe(Effect.map(Redacted.make))
+const readKeyFile = (path: string): Effect.Effect<Redacted.Redacted, CredentialError, FileSystem.FileSystem> =>
+  FileSystem.FileSystem.use((fs) => fs.readFileString(path)).pipe(
+    Effect.mapError((error) =>
+      new CredentialError({ message: `Cannot read service account key file ${path}: ${error.message}` })
+    ),
+    Effect.map(Redacted.make)
+  )
 
 /**
  * Options for resolving a credential.
@@ -195,12 +207,15 @@ export interface ResolveOptions {
 
 /**
  * Resolves the credential from the active `ConfigProvider` (the process environment by default).
- * Fails with `CredentialError` when nothing is configured or the configuration is inconsistent.
+ * Key files are read through the `FileSystem` service. Fails with `CredentialError` when nothing is
+ * configured or the configuration is inconsistent.
  *
  * @since 0.1.0
  * @category constructors
  */
-export const resolve = (options: ResolveOptions): Effect.Effect<Credential, CredentialError> =>
+export const resolve = (
+  options: ResolveOptions
+): Effect.Effect<Credential, CredentialError, FileSystem.FileSystem> =>
   Effect.gen(function*() {
     const oauth = yield* Effect.mapError(oauthEnv, configError)
     if (Option.isSome(oauth.refreshToken)) {

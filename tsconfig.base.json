@@ -28,7 +28,9 @@
     // Miscellaneous
     "skipLibCheck": true, // Skip type checking of third party libraries.
     "noErrorTruncation": true, // Do not truncate error messages.
-    "types": ["bun"], // Bun globals + Node compat types. No other @types/* are loaded implicitly.
+    // Node types only: plugin and package code must not use Bun globals so it runs under Vitest (Node) and Amp (Bun)
+    // alike. Scripts opt into "bun" (scripts/tsconfig.json). No other @types/* are loaded implicitly.
+    "types": ["node"],
     "plugins": [
       {
         "name": "@effect/language-service",

@@ -1,0 +1,254 @@
+[
+  {
+    "name": "gdrive_whoami",
+    "description": "Verify the Google credentials this plugin is using and report which identity Drive sees. Use this first when a Drive/Docs/Sheets tool fails with a permission error, and to learn which email files must be shared with.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "gdrive_search",
+    "description": "Search Google Drive for files by name and/or full text. Filter by type (docs, sheets, slides, folders) or restrict to a folder. Returns id, type, modified time, and link for each match; pass the id to gdocs_read or gsheets_read.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Words to search for in the file name and body. Omit to list everything matching the other filters."
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "any",
+            "docs",
+            "sheets",
+            "slides",
+            "folders"
+          ],
+          "description": "Restrict results to one Google file type. Default: any."
+        },
+        "folder": {
+          "type": "string",
+          "description": "Folder ID or Drive folder URL. Only direct children of this folder are returned."
+        },
+        "nameOnly": {
+          "type": "boolean",
+          "description": "Match the query against file names only, not document contents. Default: false."
+        },
+        "limit": {
+          "type": "number",
+          "description": "Maximum results (1-100). Default: 25."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "gdrive_file_info",
+    "description": "Get metadata for one Drive file (name, type, owner, modified time, link). For a Google Sheet, also lists its tabs with sizes. Accepts a file ID or any docs.google.com / drive.google.com URL.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "Drive file ID or any docs.google.com / drive.google.com URL."
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "gdocs_read",
+    "description": "Read the contents of a Google Doc as Markdown (or plain text). Also reads Google Slides (as text) and plain-text/Markdown/CSV files stored in Drive. If given a Google Sheet it returns the first tab; use gsheets_read for ranges. Long documents are paged: check `truncated` and pass startChar to continue.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "Drive file ID or any docs.google.com / drive.google.com URL."
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "markdown",
+            "text"
+          ],
+          "description": "Export format for Google Docs. Default: markdown."
+        },
+        "startChar": {
+          "type": "number",
+          "description": "Character offset to start from when paging. Default: 0."
+        },
+        "maxChars": {
+          "type": "number",
+          "description": "Maximum characters to return. Default: 60000."
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "gsheets_read",
+    "description": "Read a Google Sheet. With no range, lists the tabs and returns the first tab (or the tab named by #gid= in the URL). Pass an A1 range such as \"Roadmap!A1:F50\" or just a tab name to read that data. Output is a Markdown table by default; use format=csv for raw values or json for a 2D array.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "Drive file ID or any docs.google.com / drive.google.com URL."
+        },
+        "range": {
+          "type": "string",
+          "description": "A1 notation range, e.g. \"Sheet1!A1:D20\", or a tab name for the whole tab. Optional."
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "markdown",
+            "csv",
+            "json"
+          ],
+          "description": "Output format. Default: markdown."
+        },
+        "headerRow": {
+          "type": "boolean",
+          "description": "Treat the first returned row as a header in Markdown output. Default: true."
+        },
+        "maxRows": {
+          "type": "number",
+          "description": "Maximum rows to return. Default: 200."
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "gdrive_comments",
+    "description": "List review comments (with quoted text and replies) on a Google Doc, Sheet, or Slides file. Use to see open feedback on a document. Resolved comments are hidden unless includeResolved is true.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "Drive file ID or any docs.google.com / drive.google.com URL."
+        },
+        "includeResolved": {
+          "type": "boolean",
+          "description": "Include resolved comments. Default: false."
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "gsheets_write",
+    "description": "Write a 2D array of values into a Google Sheet. mode=update overwrites the given A1 range; mode=append adds rows after the last row of data in the given tab/range. Values are parsed like typed input (numbers, dates, formulas starting with =).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "Drive file ID or any docs.google.com / drive.google.com URL."
+        },
+        "range": {
+          "type": "string",
+          "description": "A1 range to write (update) or the tab/range to append below (append), e.g. \"Log!A1\"."
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "description": "Rows of cell values."
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "update",
+            "append"
+          ],
+          "description": "Default: update."
+        }
+      },
+      "required": [
+        "file",
+        "range",
+        "values"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "gdocs_append",
+    "description": "Append plain text to the end of a Google Doc (a newline is inserted before it). Use for adding notes, decisions, or generated sections. Markdown is not rendered; write plain prose.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "Drive file ID or any docs.google.com / drive.google.com URL."
+        },
+        "text": {
+          "type": "string",
+          "description": "Text to append."
+        }
+      },
+      "required": [
+        "file",
+        "text"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "gdrive_comment_add",
+    "description": "Add a top-level (unanchored) comment to a Google Doc, Sheet, or Slides file. Use to leave review feedback that collaborators will see in the Google UI.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "Drive file ID or any docs.google.com / drive.google.com URL."
+        },
+        "content": {
+          "type": "string",
+          "description": "Comment text."
+        }
+      },
+      "required": [
+        "file",
+        "content"
+      ],
+      "additionalProperties": false
+    }
+  }
+]
