@@ -131,10 +131,9 @@ export const Whoami = Tool.make({
           }`,
           `Scope: ${yield* auth.scope}${readOnly ? " (read-only mode)" : ""}`
         ]
-        if (credential._tag === "ServiceAccount" && Option.isNone(credential.subject)) {
-          lines.push(
-            `Files must be shared with ${credential.clientEmail} (or live in a folder/shared drive it can access).`
-          )
+        const robot = Credential.robotEmail(credential)
+        if (Option.isSome(robot)) {
+          lines.push(`Files must be shared with ${robot.value} (or live in a folder/shared drive it can access).`)
         }
         return lines.join("\n")
       })

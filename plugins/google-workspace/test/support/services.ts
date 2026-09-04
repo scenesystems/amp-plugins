@@ -12,6 +12,7 @@ import * as Redacted from "effect/Redacted"
 import * as Credential from "../../src/Credential.ts"
 import { Google, type Shape } from "../../src/Google.ts"
 import { GoogleAuth, type Shape as AuthShape } from "../../src/GoogleAuth.ts"
+import { type Shape as SubjectTokenShape, SubjectToken } from "../../src/SubjectToken.ts"
 
 /** One recorded Google call. `args` are the arguments exactly as the tool passed them. */
 export interface Call {
@@ -78,15 +79,62 @@ export const oauth: Credential.OAuthRefresh = {
   refreshToken: Redacted.make("unused")
 }
 
+export const workloadIdentity: Credential.WorkloadIdentity = {
+  _tag: "WorkloadIdentity",
+  provider: "projects/123456789012/locations/global/workloadIdentityPools/amp-orbs/providers/amp",
+  serviceAccountEmail: "amp-google-workspace@example-project.iam.gserviceaccount.com",
+  subject: Option.none(),
+  subjectToken: { _tag: "AmpOrb" }
+}
+
+export const delegatedWorkloadIdentity: Credential.WorkloadIdentity = {
+  ...workloadIdentity,
+  subject: Option.some("ari@scenesystems.io")
+}
+
 export const noCredentials = new Credential.CredentialError({
   message: [
     "No Google credentials configured.",
     "Set one of:",
-    "  - GOOGLE_SERVICE_ACCOUNT_KEY (service account JSON) as an Amp workspace secret, or",
-    "  - GOOGLE_OAUTH_CLIENT_ID + GOOGLE_OAUTH_CLIENT_SECRET + GOOGLE_OAUTH_REFRESH_TOKEN as personal secrets."
+    "  - GOOGLE_WORKLOAD_IDENTITY_PROVIDER + GOOGLE_SERVICE_ACCOUNT_EMAIL (keyless; Amp workspace variables), or",
+    "  - GOOGLE_OAUTH_CLIENT_ID + GOOGLE_OAUTH_CLIENT_SECRET + GOOGLE_OAUTH_REFRESH_TOKEN (acts as you; personal secrets), or",
+    "  - GOOGLE_SERVICE_ACCOUNT_KEY (service account JSON; Amp workspace secret)."
   ].join("\n"),
   hint: "See the google-workspace skill (reference/setup.md) for setup steps."
 })
+
+/** One recorded `SubjectToken.get` call. */
+export interface SubjectTokenCall {
+  readonly source: Credential.SubjectTokenSource
+  readonly audience: string
+}
+
+export interface RecordingSubjectToken {
+  readonly calls: ReadonlyArray<SubjectTokenCall>
+  readonly layer: Layer.Layer<SubjectToken>
+}
+
+/**
+ * A `SubjectToken` that records every request and answers with `reply`: a token, or the error the
+ * source would raise.
+ */
+export const subjectToken = (
+  reply: (call: SubjectTokenCall, index: number) => string | Credential.CredentialError
+): RecordingSubjectToken => {
+  const calls: Array<SubjectTokenCall> = []
+  const shape: SubjectTokenShape = {
+    get: (source, audience) =>
+      Effect.suspend(() => {
+        const call = { source, audience }
+        calls.push(call)
+        const result = reply(call, calls.length - 1)
+        return result instanceof Credential.CredentialError
+          ? Effect.fail(result)
+          : Effect.succeed(Redacted.make(result))
+      })
+  }
+  return { calls, layer: Layer.succeed(SubjectToken)(shape) }
+}
 
 export interface AuthOptions {
   /** Resolved credential, or the error resolving it produces. Default: `serviceAccount`. */

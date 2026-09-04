@@ -23,8 +23,9 @@ import * as Tools from "../src/Tools.ts"
 const NO_CREDENTIALS = [
   "Error: Google credential error: No Google credentials configured.",
   "Set one of:",
-  "  - GOOGLE_SERVICE_ACCOUNT_KEY (service account JSON) as an Amp workspace secret, or",
-  "  - GOOGLE_OAUTH_CLIENT_ID + GOOGLE_OAUTH_CLIENT_SECRET + GOOGLE_OAUTH_REFRESH_TOKEN as personal secrets.",
+  "  - GOOGLE_WORKLOAD_IDENTITY_PROVIDER + GOOGLE_SERVICE_ACCOUNT_EMAIL (keyless; Amp workspace variables), or",
+  "  - GOOGLE_OAUTH_CLIENT_ID + GOOGLE_OAUTH_CLIENT_SECRET + GOOGLE_OAUTH_REFRESH_TOKEN (acts as you; personal secrets), or",
+  "  - GOOGLE_SERVICE_ACCOUNT_KEY (service account JSON; Amp workspace secret).",
   "Hint: See the google-workspace skill (reference/setup.md) for setup steps."
 ].join("\n")
 
@@ -42,7 +43,8 @@ describe("plugin activation", () => {
           options: {
             title: "check Google credentials",
             category: "google-workspace",
-            description: "Verify the Google service account / OAuth credentials and show the identity Drive sees."
+            description:
+              "Verify the configured Google credentials (workload identity, OAuth, or key) and show the identity Drive sees."
           }
         }]
       )

@@ -159,6 +159,43 @@ describe("gdrive_whoami", () => {
       )
     }))
 
+  it.effect("reports the service account behind workload identity as the one files must be shared with", () =>
+    Effect.gen(function*() {
+      const h = yield* harness({
+        google: {
+          about: Effect.succeed({
+            user: { emailAddress: "amp-google-workspace@example-project.iam.gserviceaccount.com" }
+          })
+        },
+        auth: { credential: Services.workloadIdentity }
+      })
+      Assert.strictEqual(
+        yield* h.call("gdrive_whoami", {}),
+        [
+          "Credential: workload identity for service account amp-google-workspace@example-project.iam.gserviceaccount.com",
+          "Drive identity: amp-google-workspace@example-project.iam.gserviceaccount.com",
+          "Scope: https://www.googleapis.com/auth/drive",
+          "Files must be shared with amp-google-workspace@example-project.iam.gserviceaccount.com (or live in a folder/shared drive it can access)."
+        ].join("\n")
+      )
+    }))
+
+  it.effect("reports delegated workload identity as the person, with no share-with line", () =>
+    Effect.gen(function*() {
+      const h = yield* harness({
+        google: { about: Effect.succeed({ user: { emailAddress: "ari@scenesystems.io", displayName: "Ari" } }) },
+        auth: { credential: Services.delegatedWorkloadIdentity, readOnly: true }
+      })
+      Assert.strictEqual(
+        yield* h.call("gdrive_whoami", {}),
+        [
+          "Credential: workload identity for service account amp-google-workspace@example-project.iam.gserviceaccount.com impersonating ari@scenesystems.io",
+          "Drive identity: ari@scenesystems.io (Ari)",
+          "Scope: https://www.googleapis.com/auth/drive.readonly (read-only mode)"
+        ].join("\n")
+      )
+    }))
+
   it.effect("renders the credential error with its hint and makes no Google call when nothing is configured", () =>
     Effect.gen(function*() {
       const h = yield* harness({ auth: { credential: Services.noCredentials } })
@@ -167,8 +204,9 @@ describe("gdrive_whoami", () => {
         [
           "Error: Google credential error: No Google credentials configured.",
           "Set one of:",
-          "  - GOOGLE_SERVICE_ACCOUNT_KEY (service account JSON) as an Amp workspace secret, or",
-          "  - GOOGLE_OAUTH_CLIENT_ID + GOOGLE_OAUTH_CLIENT_SECRET + GOOGLE_OAUTH_REFRESH_TOKEN as personal secrets.",
+          "  - GOOGLE_WORKLOAD_IDENTITY_PROVIDER + GOOGLE_SERVICE_ACCOUNT_EMAIL (keyless; Amp workspace variables), or",
+          "  - GOOGLE_OAUTH_CLIENT_ID + GOOGLE_OAUTH_CLIENT_SECRET + GOOGLE_OAUTH_REFRESH_TOKEN (acts as you; personal secrets), or",
+          "  - GOOGLE_SERVICE_ACCOUNT_KEY (service account JSON; Amp workspace secret).",
           "Hint: See the google-workspace skill (reference/setup.md) for setup steps."
         ].join("\n")
       )

@@ -1,30 +1,39 @@
 /**
  * Credential resolution from the environment.
  *
- * Two credential kinds are supported, both read from environment variables so that
+ * Three credential kinds are supported, all read from environment variables so that
  * Amp workspace/project/personal secrets flow into orbs and local shells alike:
  *
  *   1. OAuth refresh token (acts as a specific person):
  *        GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_REFRESH_TOKEN
- *   2. Service account (acts as a robot; share files with its email):
+ *   2. Workload identity (keyless; the orb's Amp OIDC token is exchanged for a token of a
+ *      service account, so nothing long-lived is stored anywhere):
+ *        GOOGLE_WORKLOAD_IDENTITY_PROVIDER     projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
+ *        GOOGLE_SERVICE_ACCOUNT_EMAIL          the service account to impersonate
+ *        GOOGLE_WORKLOAD_IDENTITY_TOKEN_FILE   optional: read the OIDC token from a file instead of `amp orb id-token`
+ *   3. Service account key (acts as a robot; share files with its email):
  *        GOOGLE_SERVICE_ACCOUNT_KEY            (full JSON key as a string)
  *        GOOGLE_SERVICE_ACCOUNT_KEY_FILE       (path to the JSON key)
  *        GOOGLE_APPLICATION_CREDENTIALS        (standard Google env var; path to the JSON key)
- *      Optional domain-wide delegation:
+ *
+ * Kinds 2 and 3 accept optional domain-wide delegation:
  *        GOOGLE_IMPERSONATE_USER = <email> | amp-user
  *
  * GOOGLE_WORKSPACE_READ_ONLY=1 requests the read-only Drive scope and disables write tools.
  *
- * When both kinds are configured, the OAuth refresh token wins because it is the more
- * specific (per-person) credential.
+ * Precedence when several kinds are configured: OAuth (the per-person credential, normally a
+ * personal secret) over workload identity (keyless, normally workspace or project variables) over
+ * a key (the fallback for organizations that cannot use federation).
  */
 import * as Config from "effect/Config"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
+import * as Match from "effect/Match"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
+import * as Getter from "effect/SchemaGetter"
 
 /**
  * Full Drive scope.
@@ -78,22 +87,79 @@ export interface OAuthRefresh {
 }
 
 /**
+ * Where the external OIDC token for workload identity federation comes from.
+ *
  * @category models
  */
-export type Credential = ServiceAccount | OAuthRefresh
+export type SubjectTokenSource =
+  /** `amp orb id-token --audience <audience>`; only works inside an Amp orb. */
+  | { readonly _tag: "AmpOrb" }
+  /** A file holding one OIDC token (the shape of Google's `credential_source.file`), e.g. from CI. */
+  | { readonly _tag: "File"; readonly path: string }
+
+/**
+ * Keyless federation: an external OIDC token is exchanged at Google STS and used to impersonate
+ * `serviceAccountEmail`, optionally acting as `subject` through domain-wide delegation.
+ *
+ * @category models
+ */
+export interface WorkloadIdentity {
+  readonly _tag: "WorkloadIdentity"
+  /** `projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>` */
+  readonly provider: string
+  readonly serviceAccountEmail: string
+  readonly subject: Option.Option<string>
+  readonly subjectToken: SubjectTokenSource
+}
+
+/**
+ * @category models
+ */
+export type Credential = OAuthRefresh | WorkloadIdentity | ServiceAccount
+
+/**
+ * The `audience` the external OIDC token must carry: Google's default allowed audience for a
+ * provider that was created without `--allowed-audiences`.
+ *
+ * @category workload identity
+ */
+export const oidcAudience = (credential: WorkloadIdentity): string =>
+  `https://iam.googleapis.com/${credential.provider}`
+
+/**
+ * The `audience` field of the STS exchange request: the provider's full resource name.
+ *
+ * @category workload identity
+ */
+export const stsAudience = (credential: WorkloadIdentity): string => `//iam.googleapis.com/${credential.provider}`
 
 /**
  * Human-readable identity of a credential, for whoami/diagnostics. Never includes secrets.
  *
  * @category rendering
  */
-export const describe = (credential: Credential): string => {
-  if (credential._tag === "OAuthRefresh") return `OAuth user credential (client ${credential.clientId})`
-  return Option.match(credential.subject, {
-    onNone: () => `service account ${credential.clientEmail}`,
-    onSome: (subject) => `service account ${credential.clientEmail} impersonating ${subject}`
+export const describe = (credential: Credential): string =>
+  Match.valueTags(credential, {
+    OAuthRefresh: (c) => `OAuth user credential (client ${c.clientId})`,
+    WorkloadIdentity: (c) => withSubject(`workload identity for service account ${c.serviceAccountEmail}`, c.subject),
+    ServiceAccount: (c) => withSubject(`service account ${c.clientEmail}`, c.subject)
   })
-}
+
+const withSubject = (base: string, subject: Option.Option<string>): string =>
+  Option.match(subject, { onNone: () => base, onSome: (s) => `${base} impersonating ${s}` })
+
+/**
+ * The service account a robot credential acts as, when it is not impersonating a person. This is
+ * the email files must be shared with; `None` for credentials that act as a person.
+ *
+ * @category rendering
+ */
+export const robotEmail = (credential: Credential): Option.Option<string> =>
+  Match.valueTags(credential, {
+    OAuthRefresh: () => Option.none(),
+    WorkloadIdentity: (c) => Option.isSome(c.subject) ? Option.none() : Option.some(c.serviceAccountEmail),
+    ServiceAccount: (c) => Option.isSome(c.subject) ? Option.none() : Option.some(c.clientEmail)
+  })
 
 /**
  * The identity Google evaluates permissions against, for share-with-this hints.
@@ -101,9 +167,11 @@ export const describe = (credential: Credential): string => {
  * @category rendering
  */
 export const identity = (credential: Credential): string =>
-  credential._tag === "OAuthRefresh"
-    ? "the OAuth user"
-    : Option.getOrElse(credential.subject, () => credential.clientEmail)
+  Match.valueTags(credential, {
+    OAuthRefresh: () => "the OAuth user",
+    WorkloadIdentity: (c) => Option.getOrElse(c.subject, () => c.serviceAccountEmail),
+    ServiceAccount: (c) => Option.getOrElse(c.subject, () => c.clientEmail)
+  })
 
 const optionalString = (name: string) =>
   Config.string(name).pipe(
@@ -164,12 +232,68 @@ const oauthEnv = Config.all({
   clientSecret: optionalRedacted("GOOGLE_OAUTH_CLIENT_SECRET")
 })
 
+const workloadIdentityEnv = Config.all({
+  provider: optionalString("GOOGLE_WORKLOAD_IDENTITY_PROVIDER"),
+  serviceAccountEmail: optionalString("GOOGLE_SERVICE_ACCOUNT_EMAIL"),
+  tokenFile: optionalString("GOOGLE_WORKLOAD_IDENTITY_TOKEN_FILE")
+})
+
 const serviceAccountEnv = Config.all({
   inlineKey: optionalRedacted("GOOGLE_SERVICE_ACCOUNT_KEY"),
   keyFile: optionalString("GOOGLE_SERVICE_ACCOUNT_KEY_FILE"),
-  keyFileFallback: optionalString("GOOGLE_APPLICATION_CREDENTIALS"),
-  impersonate: optionalString("GOOGLE_IMPERSONATE_USER")
+  keyFileFallback: optionalString("GOOGLE_APPLICATION_CREDENTIALS")
 })
+
+const impersonateEnv = optionalString("GOOGLE_IMPERSONATE_USER")
+
+/**
+ * The canonical form of a provider name, as `gcloud iam workload-identity-pools providers describe`
+ * prints it.
+ *
+ * @category workload identity
+ */
+export const PROVIDER_FORMAT =
+  "projects/<project-number>/locations/global/workloadIdentityPools/<pool-id>/providers/<provider-id>"
+
+const CanonicalProviderName = Schema.String.pipe(
+  Schema.check(
+    Schema.isPattern(
+      /^projects\/\d+\/locations\/global\/workloadIdentityPools\/[a-z0-9-]+\/providers\/[a-z0-9-]+$/,
+      { title: "workload identity provider", description: PROVIDER_FORMAT }
+    )
+  )
+)
+
+/**
+ * A provider resource name. The `//iam.googleapis.com/` and `https://iam.googleapis.com/` prefixes
+ * used in STS and OIDC audiences are accepted and stripped so any form copied from Google's console
+ * or docs works; the decoded value is always canonical.
+ *
+ * @category workload identity
+ */
+export const ProviderName: Schema.decodeTo<typeof CanonicalProviderName, Schema.String> = Schema.String.pipe(
+  Schema.decodeTo(CanonicalProviderName, {
+    decode: Getter.transform((s: string) => s.replace(/^(https:)?\/\/iam\.googleapis\.com\//, "")),
+    encode: Getter.passthrough()
+  })
+)
+const decodeProviderName = Schema.decodeUnknownEffect(ProviderName)
+
+/**
+ * A service account email: any principal under `gserviceaccount.com`, which is the only kind of
+ * identity that can be impersonated through workload identity federation.
+ *
+ * @category workload identity
+ */
+export const ServiceAccountEmail: Schema.String = Schema.String.pipe(
+  Schema.check(
+    Schema.isPattern(/^[^@\s]+@[^@\s]+\.gserviceaccount\.com$/, {
+      title: "service account email",
+      description: "<name>@<project>.iam.gserviceaccount.com"
+    })
+  )
+)
+const decodeServiceAccountEmail = Schema.decodeUnknownEffect(ServiceAccountEmail)
 
 const configError = (error: { readonly message: string }) =>
   new CredentialError({ message: `Invalid Google credential configuration: ${error.message}`, hint: SETUP_HINT })
@@ -193,9 +317,51 @@ export interface ResolveOptions {
 }
 
 /**
+ * The error raised when no credential kind is configured at all. Lists the options in the order
+ * the setup guide recommends them.
+ *
+ * @category errors
+ */
+export const noCredentials = (): CredentialError =>
+  new CredentialError({
+    message: [
+      "No Google credentials configured.",
+      "Set one of:",
+      "  - GOOGLE_WORKLOAD_IDENTITY_PROVIDER + GOOGLE_SERVICE_ACCOUNT_EMAIL (keyless; Amp workspace variables), or",
+      "  - GOOGLE_OAUTH_CLIENT_ID + GOOGLE_OAUTH_CLIENT_SECRET + GOOGLE_OAUTH_REFRESH_TOKEN (acts as you; personal secrets), or",
+      "  - GOOGLE_SERVICE_ACCOUNT_KEY (service account JSON; Amp workspace secret)."
+    ].join("\n"),
+    hint: SETUP_HINT
+  })
+
+/** `GOOGLE_IMPERSONATE_USER`: an email, or `amp-user` for the signed-in Amp user. */
+const resolveSubject = (
+  impersonate: Option.Option<string>,
+  ampUserEmail: Option.Option<string>
+): Effect.Effect<Option.Option<string>, CredentialError> =>
+  Option.match(impersonate, {
+    onNone: () => Effect.succeedNone,
+    onSome: (value) =>
+      value.toLowerCase() !== "amp-user"
+        ? Effect.succeedSome(value)
+        : Option.match(ampUserEmail, {
+          onNone: () =>
+            Effect.fail(
+              new CredentialError({
+                message: "GOOGLE_IMPERSONATE_USER=amp-user but the Amp user email is unavailable (not signed in?)."
+              })
+            ),
+          onSome: (email) => Effect.succeedSome(email)
+        })
+  })
+
+/**
  * Resolves the credential from the active `ConfigProvider` (the process environment by default).
  * Key files are read through the `FileSystem` service. Fails with `CredentialError` when nothing is
  * configured or the configuration is inconsistent.
+ *
+ * A partially configured kind is an error, never a fall-through to the next kind: a missing
+ * variable is a mistake the user must see, not a reason to silently act as a different identity.
  *
  * @category constructors
  */
@@ -220,21 +386,60 @@ export const resolve = (
       } satisfies OAuthRefresh
     }
 
+    const impersonate = yield* Effect.mapError(impersonateEnv, configError)
+
+    const wif = yield* Effect.mapError(workloadIdentityEnv, configError)
+    if (Option.isSome(wif.provider) || Option.isSome(wif.serviceAccountEmail)) {
+      if (Option.isNone(wif.provider) || Option.isNone(wif.serviceAccountEmail)) {
+        const [set, missing] = Option.isSome(wif.provider)
+          ? ["GOOGLE_WORKLOAD_IDENTITY_PROVIDER", "GOOGLE_SERVICE_ACCOUNT_EMAIL"]
+          : ["GOOGLE_SERVICE_ACCOUNT_EMAIL", "GOOGLE_WORKLOAD_IDENTITY_PROVIDER"]
+        return yield* new CredentialError({
+          message: `${set} is set but ${missing} is missing; workload identity needs both.`,
+          hint: SETUP_HINT
+        })
+      }
+      const rawProvider = wif.provider.value
+      const rawEmail = wif.serviceAccountEmail.value
+      const provider = yield* decodeProviderName(rawProvider).pipe(
+        Effect.mapError(() =>
+          new CredentialError({
+            message: `GOOGLE_WORKLOAD_IDENTITY_PROVIDER must look like ${PROVIDER_FORMAT}, got "${rawProvider}".`,
+            hint:
+              "Copy the `name` field from: gcloud iam workload-identity-pools providers describe <provider> --location global --workload-identity-pool <pool>"
+          })
+        )
+      )
+      const serviceAccountEmail = yield* decodeServiceAccountEmail(rawEmail).pipe(
+        Effect.mapError(() =>
+          new CredentialError({
+            message:
+              `GOOGLE_SERVICE_ACCOUNT_EMAIL must be a service account (…@<project>.iam.gserviceaccount.com), got "${rawEmail}".`,
+            hint:
+              "Workload identity impersonates a service account; to act as a person set GOOGLE_IMPERSONATE_USER as well."
+          })
+        )
+      )
+      const subjectToken: SubjectTokenSource = Option.match(wif.tokenFile, {
+        onNone: () => ({ _tag: "AmpOrb" }),
+        onSome: (path) => ({ _tag: "File", path })
+      })
+      return {
+        _tag: "WorkloadIdentity",
+        provider,
+        serviceAccountEmail,
+        subject: yield* resolveSubject(impersonate, options.ampUserEmail),
+        subjectToken
+      } satisfies WorkloadIdentity
+    }
+
     const sa = yield* Effect.mapError(serviceAccountEnv, configError)
     const keyPath = Option.orElse(sa.keyFile, () => sa.keyFileFallback)
     const json = Option.isSome(sa.inlineKey)
       ? sa.inlineKey.value
       : Option.isSome(keyPath)
       ? yield* readKeyFile(keyPath.value)
-      : yield* new CredentialError({
-        message: [
-          "No Google credentials configured.",
-          "Set one of:",
-          "  - GOOGLE_SERVICE_ACCOUNT_KEY (service account JSON) as an Amp workspace secret, or",
-          "  - GOOGLE_OAUTH_CLIENT_ID + GOOGLE_OAUTH_CLIENT_SECRET + GOOGLE_OAUTH_REFRESH_TOKEN as personal secrets."
-        ].join("\n"),
-        hint: SETUP_HINT
-      })
+      : yield* noCredentials()
 
     const key = yield* decodeKey(Redacted.value(json)).pipe(
       Effect.mapError(() =>
@@ -246,21 +451,11 @@ export const resolve = (
       )
     )
 
-    const subject: Option.Option<string> = Option.isNone(sa.impersonate)
-      ? Option.none()
-      : sa.impersonate.value.toLowerCase() === "amp-user"
-      ? Option.isSome(options.ampUserEmail)
-        ? options.ampUserEmail
-        : yield* new CredentialError({
-          message: "GOOGLE_IMPERSONATE_USER=amp-user but the Amp user email is unavailable (not signed in?)."
-        })
-      : sa.impersonate
-
     return {
       _tag: "ServiceAccount",
       clientEmail: key.client_email,
       privateKey: Redacted.make(key.private_key),
       tokenUri: key.token_uri ?? "https://oauth2.googleapis.com/token",
-      subject
+      subject: yield* resolveSubject(impersonate, options.ampUserEmail)
     } satisfies ServiceAccount
   })

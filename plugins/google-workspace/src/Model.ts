@@ -252,3 +252,24 @@ export const TokenError = Schema.Struct({
   error: Schema.optionalKey(Schema.String),
   error_description: Schema.optionalKey(Schema.String)
 })
+
+/**
+ * `iamcredentials.googleapis.com` `serviceAccounts.generateAccessToken` success body. `expireTime`
+ * is RFC 3339.
+ *
+ * @category models
+ */
+export const GeneratedAccessToken = Schema.Struct({
+  accessToken: Schema.String,
+  expireTime: Schema.DateTimeUtcFromString
+})
+
+/**
+ * `iamcredentials.googleapis.com` `serviceAccounts.signJwt` success body.
+ *
+ * @category models
+ */
+export const SignedJwt = Schema.Struct({
+  keyId: Schema.optionalKey(Schema.String),
+  signedJwt: Schema.String
+})

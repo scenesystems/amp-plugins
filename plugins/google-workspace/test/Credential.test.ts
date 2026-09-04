@@ -9,6 +9,7 @@ import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as PlatformError from "effect/PlatformError"
 import * as Redacted from "effect/Redacted"
+import * as TestSchema from "effect/testing/TestSchema"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -31,6 +32,21 @@ const serviceAccount = (subject: Option.Option<string>, tokenUri = "https://oaut
     tokenUri,
     subject
   }) satisfies Credential.ServiceAccount
+
+const PROVIDER = "projects/123456789012/locations/global/workloadIdentityPools/amp-orbs/providers/amp"
+const SA_EMAIL = "amp-google-workspace@example-project.iam.gserviceaccount.com"
+
+const workloadIdentity = (
+  subject: Option.Option<string>,
+  subjectToken: Credential.SubjectTokenSource = { _tag: "AmpOrb" }
+) =>
+  ({
+    _tag: "WorkloadIdentity",
+    provider: PROVIDER,
+    serviceAccountEmail: SA_EMAIL,
+    subject,
+    subjectToken
+  }) satisfies Credential.WorkloadIdentity
 
 /** No files exist: any read is a `NotFound` platform error, like an unmounted secret. */
 const noFiles = FileSystem.layerNoop({
@@ -275,6 +291,187 @@ describe("Credential.resolve", () => {
       }))
   })
 
+  describe("workload identity", () => {
+    const wifEnv = {
+      GOOGLE_WORKLOAD_IDENTITY_PROVIDER: PROVIDER,
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: SA_EMAIL
+    }
+
+    it.effect("resolves the provider and service account, sourcing the token from the orb by default", () =>
+      Effect.gen(function*() {
+        const exit = yield* resolve(wifEnv)
+        ExitAssert.assertSucceeds(exit, workloadIdentity(Option.none()))
+      }))
+
+    it.effect("reads the OIDC token from GOOGLE_WORKLOAD_IDENTITY_TOKEN_FILE when set", () =>
+      Effect.gen(function*() {
+        const exit = yield* resolve({ ...wifEnv, GOOGLE_WORKLOAD_IDENTITY_TOKEN_FILE: "/var/run/oidc/token" })
+        ExitAssert.assertSucceeds(
+          exit,
+          workloadIdentity(Option.none(), { _tag: "File", path: "/var/run/oidc/token" })
+        )
+      }))
+
+    it.effect("does not touch the file system: the token file is read per exchange, not at resolution", () =>
+      Effect.gen(function*() {
+        const exit = yield* resolve(
+          { ...wifEnv, GOOGLE_WORKLOAD_IDENTITY_TOKEN_FILE: "/var/run/oidc/token" },
+          { fs: FileSystem.layerNoop({ readFileString: () => Effect.die("the file system must not be consulted") }) }
+        )
+        ExitAssert.assertSucceeds(
+          exit,
+          workloadIdentity(Option.none(), { _tag: "File", path: "/var/run/oidc/token" })
+        )
+      }))
+
+    it.effect.each([
+      { form: "the STS audience form", value: `//iam.googleapis.com/${PROVIDER}` },
+      { form: "the OIDC audience form", value: `https://iam.googleapis.com/${PROVIDER}` },
+      { form: "surrounding whitespace", value: `  ${PROVIDER}\n` }
+    ])("canonicalises a provider copied with $form", ({ value }) =>
+      Effect.gen(function*() {
+        const exit = yield* resolve({ ...wifEnv, GOOGLE_WORKLOAD_IDENTITY_PROVIDER: value })
+        ExitAssert.assertSucceeds(exit, workloadIdentity(Option.none()))
+      }))
+
+    it.effect.each([
+      { name: "a project id instead of a number", value: PROVIDER.replace("123456789012", "example-project") },
+      {
+        name: "a pool without a provider",
+        value: "projects/123456789012/locations/global/workloadIdentityPools/amp-orbs"
+      },
+      { name: "a regional location", value: PROVIDER.replace("/global/", "/us-central1/") },
+      { name: "an uppercase pool id", value: PROVIDER.replace("amp-orbs", "Amp-Orbs") },
+      { name: "a bare pool id", value: "amp-orbs" }
+    ])(
+      "rejects a provider that is $name with the gcloud command that prints the right one",
+      ({ value }) =>
+        Effect.gen(function*() {
+          const exit = yield* resolve({ ...wifEnv, GOOGLE_WORKLOAD_IDENTITY_PROVIDER: value })
+          ExitAssert.assertFails(
+            exit,
+            new Credential.CredentialError({
+              message:
+                `GOOGLE_WORKLOAD_IDENTITY_PROVIDER must look like projects/<project-number>/locations/global/workloadIdentityPools/<pool-id>/providers/<provider-id>, got "${value}".`,
+              hint:
+                "Copy the `name` field from: gcloud iam workload-identity-pools providers describe <provider> --location global --workload-identity-pool <pool>"
+            })
+          )
+        })
+    )
+
+    it.effect.each([
+      { name: "a person's address", value: "ari@scenesystems.io" },
+      { name: "a service account's unique id", value: "123456789012345678901" },
+      { name: "a gserviceaccount.com domain without a local part", value: "@example-project.iam.gserviceaccount.com" }
+    ])(
+      "rejects $name as the service account and explains how to act as a person",
+      ({ value }) =>
+        Effect.gen(function*() {
+          const exit = yield* resolve({ ...wifEnv, GOOGLE_SERVICE_ACCOUNT_EMAIL: value })
+          ExitAssert.assertFails(
+            exit,
+            new Credential.CredentialError({
+              message:
+                `GOOGLE_SERVICE_ACCOUNT_EMAIL must be a service account (…@<project>.iam.gserviceaccount.com), got "${value}".`,
+              hint:
+                "Workload identity impersonates a service account; to act as a person set GOOGLE_IMPERSONATE_USER as well."
+            })
+          )
+        })
+    )
+
+    it.effect("accepts the default-compute service account form as well", () =>
+      Effect.gen(function*() {
+        const email = "123456789012-compute@developer.gserviceaccount.com"
+        const exit = yield* resolve({ ...wifEnv, GOOGLE_SERVICE_ACCOUNT_EMAIL: email })
+        ExitAssert.assertSucceeds(exit, { ...workloadIdentity(Option.none()), serviceAccountEmail: email })
+      }))
+
+    it.effect.each([
+      {
+        set: "GOOGLE_WORKLOAD_IDENTITY_PROVIDER",
+        missing: "GOOGLE_SERVICE_ACCOUNT_EMAIL",
+        record: { GOOGLE_WORKLOAD_IDENTITY_PROVIDER: PROVIDER }
+      },
+      {
+        set: "GOOGLE_SERVICE_ACCOUNT_EMAIL",
+        missing: "GOOGLE_WORKLOAD_IDENTITY_PROVIDER",
+        record: { GOOGLE_SERVICE_ACCOUNT_EMAIL: SA_EMAIL }
+      },
+      {
+        set: "GOOGLE_SERVICE_ACCOUNT_EMAIL",
+        missing: "GOOGLE_WORKLOAD_IDENTITY_PROVIDER",
+        record: { GOOGLE_SERVICE_ACCOUNT_EMAIL: SA_EMAIL, GOOGLE_WORKLOAD_IDENTITY_PROVIDER: "  " }
+      }
+    ])(
+      "fails when $set is set but $missing is missing, even with a key configured",
+      ({ missing, record, set }) =>
+        Effect.gen(function*() {
+          const exit = yield* resolve({ ...record, GOOGLE_SERVICE_ACCOUNT_KEY: JSON.stringify(KEY) })
+          ExitAssert.assertFails(
+            exit,
+            new Credential.CredentialError({
+              message: `${set} is set but ${missing} is missing; workload identity needs both.`,
+              hint: SETUP_HINT
+            })
+          )
+        })
+    )
+
+    it.effect("wins over a service account key when both are configured", () =>
+      Effect.gen(function*() {
+        const exit = yield* resolve({ ...wifEnv, GOOGLE_SERVICE_ACCOUNT_KEY: JSON.stringify(KEY) })
+        ExitAssert.assertSucceeds(exit, workloadIdentity(Option.none()))
+      }))
+
+    it.effect("loses to an OAuth refresh token, whose variables are then the only ones validated", () =>
+      Effect.gen(function*() {
+        const exit = yield* resolve({
+          ...wifEnv,
+          GOOGLE_WORKLOAD_IDENTITY_PROVIDER: "not-a-provider",
+          GOOGLE_OAUTH_CLIENT_ID: "id",
+          GOOGLE_OAUTH_CLIENT_SECRET: "secret",
+          GOOGLE_OAUTH_REFRESH_TOKEN: "token"
+        })
+        ExitAssert.assertSucceeds(
+          exit,
+          {
+            _tag: "OAuthRefresh",
+            clientId: "id",
+            clientSecret: Redacted.make("secret"),
+            refreshToken: Redacted.make("token")
+          } satisfies Credential.OAuthRefresh
+        )
+      }))
+
+    it.effect("impersonates the configured email through domain-wide delegation", () =>
+      Effect.gen(function*() {
+        const exit = yield* resolve({ ...wifEnv, GOOGLE_IMPERSONATE_USER: "ari@scenesystems.io" })
+        ExitAssert.assertSucceeds(exit, workloadIdentity(Option.some("ari@scenesystems.io")))
+      }))
+
+    it.effect("impersonates the signed-in Amp user for GOOGLE_IMPERSONATE_USER=amp-user", () =>
+      Effect.gen(function*() {
+        const exit = yield* resolve(
+          { ...wifEnv, GOOGLE_IMPERSONATE_USER: "amp-user" },
+          { ampUserEmail: Option.some("ari@scenesystems.io") }
+        )
+        ExitAssert.assertSucceeds(exit, workloadIdentity(Option.some("ari@scenesystems.io")))
+      }))
+
+    it.effect("fails amp-user impersonation without a signed-in email", () =>
+      Effect.gen(function*() {
+        const exit = yield* resolve({ ...wifEnv, GOOGLE_IMPERSONATE_USER: "amp-user" })
+        ExitAssert.assertFails(
+          exit,
+          new Credential.CredentialError({
+            message: "GOOGLE_IMPERSONATE_USER=amp-user but the Amp user email is unavailable (not signed in?)."
+          })
+        )
+      }))
+  })
+
   describe("nothing configured", () => {
     it.effect.each([
       { name: "an empty environment", record: {} },
@@ -283,10 +480,16 @@ describe("Credential.resolve", () => {
         record: {
           GOOGLE_SERVICE_ACCOUNT_KEY: "",
           GOOGLE_SERVICE_ACCOUNT_KEY_FILE: " ",
-          GOOGLE_OAUTH_REFRESH_TOKEN: "\n"
+          GOOGLE_OAUTH_REFRESH_TOKEN: "\n",
+          GOOGLE_WORKLOAD_IDENTITY_PROVIDER: "\t",
+          GOOGLE_SERVICE_ACCOUNT_EMAIL: ""
         }
       },
-      { name: "only an impersonation target", record: { GOOGLE_IMPERSONATE_USER: "ari@scenesystems.io" } }
+      { name: "only an impersonation target", record: { GOOGLE_IMPERSONATE_USER: "ari@scenesystems.io" } },
+      {
+        name: "only a token file",
+        record: { GOOGLE_WORKLOAD_IDENTITY_TOKEN_FILE: "/var/run/oidc/token" }
+      }
     ])("fails with the setup instructions given $name", ({ record }) =>
       Effect.gen(function*() {
         const exit = yield* resolve(record)
@@ -296,8 +499,9 @@ describe("Credential.resolve", () => {
             message: [
               "No Google credentials configured.",
               "Set one of:",
-              "  - GOOGLE_SERVICE_ACCOUNT_KEY (service account JSON) as an Amp workspace secret, or",
-              "  - GOOGLE_OAUTH_CLIENT_ID + GOOGLE_OAUTH_CLIENT_SECRET + GOOGLE_OAUTH_REFRESH_TOKEN as personal secrets."
+              "  - GOOGLE_WORKLOAD_IDENTITY_PROVIDER + GOOGLE_SERVICE_ACCOUNT_EMAIL (keyless; Amp workspace variables), or",
+              "  - GOOGLE_OAUTH_CLIENT_ID + GOOGLE_OAUTH_CLIENT_SECRET + GOOGLE_OAUTH_REFRESH_TOKEN (acts as you; personal secrets), or",
+              "  - GOOGLE_SERVICE_ACCOUNT_KEY (service account JSON; Amp workspace secret)."
             ].join("\n"),
             hint: SETUP_HINT
           })
@@ -368,11 +572,42 @@ describe("Credential.readOnly and scope", () => {
     }))
 })
 
-describe("Credential.describe and identity", () => {
+describe("Credential.ProviderName schema", () => {
+  const asserts = new TestSchema.Asserts(Credential.ProviderName)
+
+  it("decodes the canonical name and both audience spellings to the canonical name", async () => {
+    await asserts.decoding().succeed(PROVIDER, PROVIDER)
+    await asserts.decoding().succeed(`//iam.googleapis.com/${PROVIDER}`, PROVIDER)
+    await asserts.decoding().succeed(`https://iam.googleapis.com/${PROVIDER}`, PROVIDER)
+  })
+
+  it("rejects other hosts and non-canonical shapes with the documented format", async () => {
+    const expected =
+      "Expected a string matching the RegExp ^projects\\/\\d+\\/locations\\/global\\/workloadIdentityPools\\/[a-z0-9-]+\\/providers\\/[a-z0-9-]+$"
+    await asserts.decoding().fail(`//sts.googleapis.com/${PROVIDER}`, expected)
+    await asserts.decoding().fail("amp-orbs", expected)
+    await asserts.decoding().fail(42, "Expected string")
+  })
+
+  it("encodes the canonical name unchanged", async () => {
+    await asserts.encoding().succeed(PROVIDER, PROVIDER)
+  })
+})
+
+describe("Credential.oidcAudience and stsAudience", () => {
+  it("derive both audiences from the provider name", () => {
+    const credential = workloadIdentity(Option.none())
+    Assert.strictEqual(Credential.oidcAudience(credential), `https://iam.googleapis.com/${PROVIDER}`)
+    Assert.strictEqual(Credential.stsAudience(credential), `//iam.googleapis.com/${PROVIDER}`)
+  })
+})
+
+describe("Credential.describe, identity, and robotEmail", () => {
   it("names a plain service account and says files must be shared with it", () => {
     const credential = serviceAccount(Option.none())
     Assert.strictEqual(Credential.describe(credential), `service account ${KEY.client_email}`)
     Assert.strictEqual(Credential.identity(credential), KEY.client_email)
+    Assert.assertSome(Credential.robotEmail(credential), KEY.client_email)
   })
 
   it("names the impersonated user for a delegated service account", () => {
@@ -382,6 +617,24 @@ describe("Credential.describe and identity", () => {
       `service account ${KEY.client_email} impersonating ari@scenesystems.io`
     )
     Assert.strictEqual(Credential.identity(credential), "ari@scenesystems.io")
+    Assert.assertNone(Credential.robotEmail(credential))
+  })
+
+  it("names the service account behind workload identity and says files must be shared with it", () => {
+    const credential = workloadIdentity(Option.none())
+    Assert.strictEqual(Credential.describe(credential), `workload identity for service account ${SA_EMAIL}`)
+    Assert.strictEqual(Credential.identity(credential), SA_EMAIL)
+    Assert.assertSome(Credential.robotEmail(credential), SA_EMAIL)
+  })
+
+  it("names the impersonated user for delegated workload identity", () => {
+    const credential = workloadIdentity(Option.some("ari@scenesystems.io"))
+    Assert.strictEqual(
+      Credential.describe(credential),
+      `workload identity for service account ${SA_EMAIL} impersonating ari@scenesystems.io`
+    )
+    Assert.strictEqual(Credential.identity(credential), "ari@scenesystems.io")
+    Assert.assertNone(Credential.robotEmail(credential))
   })
 
   it("names the OAuth client and never its secrets", () => {
@@ -393,6 +646,7 @@ describe("Credential.describe and identity", () => {
     }
     Assert.strictEqual(Credential.describe(credential), "OAuth user credential (client client-id)")
     Assert.strictEqual(Credential.identity(credential), "the OAuth user")
+    Assert.assertNone(Credential.robotEmail(credential))
     ExitAssert.assertRedacted(credential, ["GOCSPX-secret", "1//refresh"])
   })
 

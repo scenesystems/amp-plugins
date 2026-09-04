@@ -47,9 +47,9 @@ git -C ~/.cache/amp/repositories/ampcode.com-workspace-plugins push
 ```
 
 For one project or one machine instead, unzip into `.amp/plugins/` or `~/.config/amp/plugins/` and run
-`plugins: reload` from Amp's command palette. Each plugin's README lists the secrets it reads (for example
-`GOOGLE_SERVICE_ACCOUNT_KEY`); set them as Amp workspace or personal secrets so they reach the plugin as environment
-variables.
+`plugins: reload` from Amp's command palette. Each plugin's README lists the configuration it reads (for example
+`GOOGLE_WORKLOAD_IDENTITY_PROVIDER`); set it with `amp secrets set` at workspace, project, or personal scope so it
+reaches the plugin as environment variables.
 
 ### Releasing (maintainers)
 
@@ -86,7 +86,7 @@ bun run test         # unit tests (Vitest + @effect/vitest); `bun run test:watch
 bun run build        # dist/<plugin>/ for every plugin, or `bun run build google-workspace`
 bun run test:bundle  # build, then load dist/*/index.js under Bun, the runtime Amp uses
 bun run ci           # all of the above, in order
-bun run test:contract  # real Google APIs; needs GOOGLE_SERVICE_ACCOUNT_KEY + GOOGLE_WORKSPACE_CONTRACT_FOLDER
+bun run test:contract  # real Google APIs; needs any google-workspace credential + GOOGLE_WORKSPACE_CONTRACT_FOLDER
 ```
 
 To try a build inside Amp without installing it, copy `dist/<plugin>/` into `~/.config/amp/plugins/<plugin>/` and run

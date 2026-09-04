@@ -34,26 +34,37 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-  # Runs the plugins against the real Google APIs. Needs repository secrets:
-  #   GOOGLE_SERVICE_ACCOUNT_KEY        service-account JSON (the same value the plugin reads in Amp)
-  #   GOOGLE_WORKSPACE_CONTRACT_FOLDER  Drive folder ID shared with that account; fixtures are created and deleted there
-  # Skipped when the key secret is absent (forks, dependency PRs). The suite itself fails fast if either variable is
-  # missing, so it is never silently green.
+  # Runs the plugins against the real Google APIs, keyless: the job's GitHub OIDC token is written to a file and the
+  # plugin's own workload identity credential (GOOGLE_WORKLOAD_IDENTITY_TOKEN_FILE) exchanges it, exactly as an orb
+  # would exchange `amp orb id-token`. Provisioned by
+  #   plugins/google-workspace/scripts/google-setup.sh ... --github-repository <owner/repo>
+  # which prints the repository *variables* to set (nothing here is secret):
+  #   GOOGLE_WORKLOAD_IDENTITY_PROVIDER  the pool's `github` provider
+  #   GOOGLE_SERVICE_ACCOUNT_EMAIL       the service account it may impersonate
+  #   GOOGLE_WORKSPACE_CONTRACT_FOLDER   Drive folder ID shared with that account as Editor; fixtures are created and deleted there
+  # A GOOGLE_SERVICE_ACCOUNT_KEY repository secret is accepted instead for organizations that cannot federate.
+  # Skipped when neither is configured (forks, dependency PRs). The suite itself fails fast if anything is missing, so
+  # it is never silently green.
   contract:
     runs-on: ubuntu-latest
     needs: verify
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      id-token: write
     env:
+      GOOGLE_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GOOGLE_WORKLOAD_IDENTITY_PROVIDER }}
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ vars.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
       GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
-      GOOGLE_WORKSPACE_CONTRACT_FOLDER: ${{ secrets.GOOGLE_WORKSPACE_CONTRACT_FOLDER }}
+      GOOGLE_WORKSPACE_CONTRACT_FOLDER: ${{ vars.GOOGLE_WORKSPACE_CONTRACT_FOLDER || secrets.GOOGLE_WORKSPACE_CONTRACT_FOLDER }}
     steps:
       - name: Check for credentials
         id: creds
         run: |
-          if [ -n "$GOOGLE_SERVICE_ACCOUNT_KEY" ]; then
+          if [ -n "$GOOGLE_WORKLOAD_IDENTITY_PROVIDER" ] || [ -n "$GOOGLE_SERVICE_ACCOUNT_KEY" ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice::GOOGLE_SERVICE_ACCOUNT_KEY is not configured; contract tests not run."
+            echo "::notice::Neither GOOGLE_WORKLOAD_IDENTITY_PROVIDER (variable) nor GOOGLE_SERVICE_ACCOUNT_KEY (secret) is configured; contract tests not run."
           fi
       - if: steps.creds.outputs.present == 'true'
         uses: actions/checkout@v7
@@ -67,5 +78,15 @@ jobs:
           node-version-file: .node-version
       - if: steps.creds.outputs.present == 'true'
         run: bun install --frozen-lockfile
+      # Requested right before the tests: GitHub's OIDC token is short-lived, and the plugin reads the file on each
+      # mint. The audience is Google's default for a provider created without --allowed-audiences.
+      - if: steps.creds.outputs.present == 'true' && env.GOOGLE_WORKLOAD_IDENTITY_PROVIDER != ''
+        name: Mint the GitHub OIDC token for Google
+        run: |
+          token_file="$RUNNER_TEMP/google-oidc-token"
+          curl -fsS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://iam.googleapis.com/$GOOGLE_WORKLOAD_IDENTITY_PROVIDER" \
+            | jq -er .value > "$token_file"
+          echo "GOOGLE_WORKLOAD_IDENTITY_TOKEN_FILE=$token_file" >> "$GITHUB_ENV"
       - if: steps.creds.outputs.present == 'true'
         run: bun run test:contract

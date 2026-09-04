@@ -44,30 +44,49 @@ files or symbols it describes, and call out where they disagree.
 
 ## Troubleshooting
 
-- `No Google credentials configured` — credentials are not set. Point the user at the Setup
-  section below.
+Every credential error names the failing step and carries a hint; relay both to the user rather
+than paraphrasing.
+
+- `No Google credentials configured` — nothing is set. Point the user at Setup below.
 - `Google API error 404` or `403` — the identity cannot see the file. Run `gdrive_whoami` and tell
-  the user which email the file (or its folder) must be shared with.
+  the user which address the file (or its folder) must be shared with. A 404 from Google means
+  "not shared with this identity", not "does not exist".
 - `accessNotConfigured` — the Drive/Docs/Sheets APIs are not enabled in the Google Cloud project.
-- `invalid_grant` while minting a token — the service account key was revoked or the OAuth refresh
-  token was revoked/expired; re-run setup.
-- After the user adds or changes secrets in an orb, run `amp orb restart-processes` so the plugin
-  process receives the new environment.
+- `Could not run \`amp orb id-token\``or`exited with code`— workload identity is configured but
+  this is not an orb (a laptop, or a runner). The user needs OAuth locally, or`GOOGLE_WORKLOAD_IDENTITY_TOKEN_FILE`.
+- `Google STS token exchange failed` — the provider name is wrong, its attribute condition does not
+  admit this Amp workspace, or it restricts allowed audiences. Re-run
+  `google-setup.sh` with the right `--amp-workspace-id`.
+- `generateAccessToken` or `signJwt` failed — the impersonation grant is missing
+  (`roles/iam.workloadIdentityUser`, or `roles/iam.serviceAccountTokenCreator` with
+  `GOOGLE_IMPERSONATE_USER`). `google-setup.sh` (with `--delegation`) adds it.
+- `invalid_grant` — a revoked key or OAuth refresh token, or domain-wide delegation not authorized
+  for this exact scope; re-run the matching setup step.
+- After secrets change, `amp orb restart-processes` in a running orb; new orbs need nothing.
 
 ## Setup
 
-Credentials are read from environment variables. In orbs these come from Amp secrets
-(Workspace → Project → Personal precedence); locally set them in your shell. Read
-`{baseDir}/reference/setup.md` for step-by-step instructions covering:
+Credentials come from environment variables: Amp secrets in orbs (personal > project > workspace),
+the shell locally. The plugin acts as one Google identity and sees exactly what Drive shares with
+it, so setup is "pick an identity, then share a folder with it". `{baseDir}/reference/setup.md` is
+the full guide, including the permissions model; the short version:
 
-- Option A (recommended for a team): a Google service account key in the workspace secret
-  `GOOGLE_SERVICE_ACCOUNT_KEY`, with files or a shared folder shared to the service account email.
-  Optional `GOOGLE_IMPERSONATE_USER=<email>|amp-user` for domain-wide delegation.
-- Option B (per person): OAuth client + refresh token in personal secrets `GOOGLE_OAUTH_CLIENT_ID`,
-  `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REFRESH_TOKEN`, produced by running
-  `bun run plugins/google-workspace/scripts/oauth-setup.ts` from a clone of
-  `github.com/scenesystems/amp-plugins` on a machine with a browser.
-- `GOOGLE_WORKSPACE_READ_ONLY=1` to disable the write tools workspace-wide.
+- **Workload identity** (default): keyless. A Google Cloud admin runs
+  `plugins/google-workspace/scripts/google-setup.sh --project <gcp> --amp-workspace-id <uuid>` once
+  from a clone of `github.com/scenesystems/amp-plugins`; it prints the two
+  `amp secrets set --workspace … --env` commands (`GOOGLE_WORKLOAD_IDENTITY_PROVIDER`,
+  `GOOGLE_SERVICE_ACCOUNT_EMAIL`). Orbs prove who they are with `amp orb id-token`; no secret is
+  stored anywhere.
+- **OAuth** (per person, works outside orbs): `GOOGLE_OAUTH_CLIENT_ID`/`_SECRET` as workspace
+  values, then each person runs `bun run plugins/google-workspace/scripts/oauth-setup.ts` on a machine
+  with a browser and stores the printed `GOOGLE_OAUTH_REFRESH_TOKEN` as a personal secret. Personal
+  OAuth overrides the workspace's workload identity.
+- **Service account key** (fallback when federation is forbidden): `google-setup.sh --key file.json`,
+  stored as the workspace secret `GOOGLE_SERVICE_ACCOUNT_KEY`.
+- `GOOGLE_IMPERSONATE_USER=<email>|amp-user` makes a robot credential act as a person (domain-wide
+  delegation); `GOOGLE_WORKSPACE_READ_ONLY=1` requests the read-only scope and disables write tools.
 
-The Amp command `google-workspace: check Google credentials` (command palette) reports the resolved
-identity or the exact configuration problem without spending a tool call.
+When the user asks how to set this up, read `{baseDir}/reference/setup.md` and walk them through the
+kind that fits; do not improvise console steps. The Amp command
+`google-workspace: check Google credentials` (command palette) reports the resolved identity or the
+exact configuration problem without spending a tool call.

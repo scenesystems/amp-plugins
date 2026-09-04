@@ -10,23 +10,32 @@ code.
   docs.google.com / drive.google.com URL (`#gid=` selects a sheet tab).
 - **Command**: `google-workspace: check Google credentials` reports the identity Drive sees or the exact
   configuration problem.
-- **Credentials**: environment variables, supplied by Amp secrets in orbs. See
-  [skills/google-workspace/reference/setup.md](skills/google-workspace/reference/setup.md).
-- **Runtime**: Drive v3, Sheets v4, and Docs v1 REST APIs over Effect's `HttpClient`; the service-account JWT is
-  signed with WebCrypto. No Google SDKs.
+- **Credentials**: keyless by default. Orbs prove their identity with `amp orb id-token` and Google's Workload
+  Identity Federation exchanges that proof for a one-hour service-account token, so nothing long-lived is stored in
+  Amp. OAuth (per person) and a service-account key (fallback) are also supported. Setup, precedence, and the
+  permissions model are in [skills/google-workspace/reference/setup.md](skills/google-workspace/reference/setup.md);
+  `scripts/google-setup.sh` provisions the Google Cloud side in one idempotent run.
+- **Runtime**: Drive v3, Sheets v4, Docs v1, STS, and IAM Credentials REST APIs over Effect's `HttpClient`; the
+  service-account JWT (key kind) is signed with WebCrypto. No Google SDKs.
 
 ## Configuration
 
-| Variable                                                                             | Purpose                                                                    |
-| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
-| `GOOGLE_SERVICE_ACCOUNT_KEY`                                                         | Service account key JSON (recommended workspace secret)                    |
-| `GOOGLE_SERVICE_ACCOUNT_KEY_FILE` / `GOOGLE_APPLICATION_CREDENTIALS`                 | Path to the key JSON instead of inline                                     |
-| `GOOGLE_IMPERSONATE_USER`                                                            | `<email>` or `amp-user`; domain-wide delegation subject                    |
-| `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REFRESH_TOKEN` | Personal OAuth grant; wins over the service account when all three are set |
-| `GOOGLE_WORKSPACE_READ_ONLY`                                                         | `1`/`true` requests the read-only scope and disables the three write tools |
+Environment variables, supplied by Amp secrets in orbs (personal > project > workspace) or the shell locally. One
+kind must be complete; a partial kind is an error, never a fall-through. Precedence: OAuth → workload identity → key.
 
-Set them with `amp secrets set --workspace|--user NAME --secret` (or `--env` for non-secret values). In a running
-orb, `amp orb restart-processes` makes the plugin see changed secrets.
+| Variable                                                                             | Kind              | Purpose                                                                                |
+| ------------------------------------------------------------------------------------ | ----------------- | -------------------------------------------------------------------------------------- |
+| `GOOGLE_WORKLOAD_IDENTITY_PROVIDER`                                                  | workload identity | `projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>` |
+| `GOOGLE_SERVICE_ACCOUNT_EMAIL`                                                       | workload identity | service account the orb impersonates                                                   |
+| `GOOGLE_WORKLOAD_IDENTITY_TOKEN_FILE`                                                | workload identity | optional: read the OIDC token from a file (CI) instead of `amp orb id-token`           |
+| `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REFRESH_TOKEN` | OAuth             | acts as one person; the refresh token belongs in personal secrets                      |
+| `GOOGLE_SERVICE_ACCOUNT_KEY`                                                         | key               | service account key JSON (fallback when federation is impossible)                      |
+| `GOOGLE_SERVICE_ACCOUNT_KEY_FILE` / `GOOGLE_APPLICATION_CREDENTIALS`                 | key               | path to the key JSON instead of inline                                                 |
+| `GOOGLE_IMPERSONATE_USER`                                                            | robot kinds       | `<email>` or `amp-user`; domain-wide delegation subject                                |
+| `GOOGLE_WORKSPACE_READ_ONLY`                                                         | all               | `1`/`true` requests the read-only scope and disables the three write tools             |
+
+`printf '%s' VALUE | amp secrets set --workspace|--project|--user NAME --env|--secret --data-file -` sets one
+non-interactively. In a running orb, `amp orb restart-processes` makes the plugin see changed values.
 
 ## Layout
 
@@ -36,11 +45,15 @@ plugins/google-workspace/
 │   ├── index.ts        plugin entry: description, Layer, tool/command/skill registration
 │   ├── Tools.ts        the nine tools (Tool.make) and error → hint mapping
 │   ├── Google.ts       Google service: typed Drive/Sheets/Docs calls, 401 retry, error parsing
-│   ├── GoogleAuth.ts   GoogleAuth service: token minting (JWT bearer or refresh token) and caching
-│   ├── Credential.ts   credential resolution from Config (environment), read-only flag, scopes
+│   ├── GoogleAuth.ts   GoogleAuth service: token minting per credential kind (STS exchange + impersonation,
+│   │                   refresh token, or locally signed JWT) and caching
+│   ├── SubjectToken.ts SubjectToken service: the orb's OIDC token via `amp orb id-token`, or a token file
+│   ├── Credential.ts   credential resolution from Config (environment), precedence, read-only flag, scopes
 │   ├── Model.ts        Schema models for API payloads
 │   └── Format.ts       pure helpers: URL/ID parsing (FileRef schema), Drive queries, Markdown/CSV rendering
-├── test/               bun tests (stubbed HttpClient, generated RSA key, tools run through Tool.toPluginTool)
+├── test/               Vitest + @effect/vitest (stubbed HttpClient, generated RSA key, fake `amp` on PATH,
+│                       tools run through Tool.toPluginTool); test/contract/ hits the real APIs
+├── scripts/google-setup.sh  Google Cloud provisioning for workload identity (gcloud; run on a workstation)
 ├── scripts/oauth-setup.ts   one-time per-user OAuth helper (run locally, not bundled)
 └── skills/google-workspace/ SKILL.md + reference/setup.md (copied into the build)
 ```
@@ -49,8 +62,12 @@ plugins/google-workspace/
 ┌──────────┐   ┌─────────────┐   ┌──────────────┐   ┌────────────┐
 │ Tools.ts │──▶│  Google.ts  │──▶│ GoogleAuth.ts│──▶│ Credential │
 │ (Tool.   │   │ HttpClient  │   │ token cache  │   │ Config/env │
-│  make)   │   │ + bearer    │   │ JWT / refresh│   └────────────┘
-└──────────┘   └─────────────┘   └──────────────┘
+│  make)   │   │ + bearer    │   │ STS/JWT/     │   └────────────┘
+└──────────┘   └─────────────┘   │ refresh      │──▶┌──────────────┐
+                                 └──────────────┘   │ SubjectToken │
+                                                    │ amp orb      │
+                                                    │ id-token     │
+                                                    └──────────────┘
 ```
 
 ## Develop
