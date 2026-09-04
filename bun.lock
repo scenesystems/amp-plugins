@@ -7,8 +7,8 @@
       "devDependencies": {
         "@ampcode/plugin": "0.0.0-20260904001652-g2bd7889",
         "@effect/tsgo": "0.41.0",
-        "@types/bun": "1.4.0",
-        "dprint": "0.57.1",
+        "@types/bun": "^1.4.0",
+        "dprint": "^0.57.1",
         "oxlint": "1.81.0",
         "oxlint-tsgolint": "7.0.2001",
         "typescript": "7.0.2",
@@ -18,10 +18,18 @@
       "name": "@scenesystems/amp-plugin-core",
       "version": "0.0.0",
       "dependencies": {
-        "effect": "4.0.0-rc.112",
+        "effect": "^4.0.0-rc.112",
       },
       "devDependencies": {
         "@ampcode/plugin": "0.0.0-20260904001652-g2bd7889",
+        "@scenesystems/amp-plugin-testing": "workspace:*",
+      },
+    },
+    "packages/testing": {
+      "name": "@scenesystems/amp-plugin-testing",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect": "^4.0.0-rc.112",
       },
     },
     "plugins/google-workspace": {
@@ -29,10 +37,11 @@
       "version": "0.1.0",
       "dependencies": {
         "@scenesystems/amp-plugin-core": "workspace:*",
-        "effect": "4.0.0-rc.112",
+        "effect": "^4.0.0-rc.112",
       },
       "devDependencies": {
         "@ampcode/plugin": "0.0.0-20260904001652-g2bd7889",
+        "@scenesystems/amp-plugin-testing": "workspace:*",
       },
     },
   },
@@ -150,6 +159,8 @@
     "@scenesystems/amp-plugin-core": ["@scenesystems/amp-plugin-core@workspace:packages/core"],
 
     "@scenesystems/amp-plugin-google-workspace": ["@scenesystems/amp-plugin-google-workspace@workspace:plugins/google-workspace"],
+
+    "@scenesystems/amp-plugin-testing": ["@scenesystems/amp-plugin-testing@workspace:packages/testing"],
 
     "@types/bun": ["@types/bun@1.4.0", "", { "dependencies": { "bun-types": "1.4.0" } }, "sha512-K+lZULY23vRgK/CfTjFIV+tyifaNdSMlPh9j+6mQ/cLfpOznLyAuzgV/JQysyECpkBQLVMSyvjlr2fBUSA9wFQ=="],
 

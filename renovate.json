@@ -1,0 +1,40 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Dependency update policy. See README 'Dependency versions' for the reasoning behind each group.",
+  "extends": ["config:recommended", ":semanticCommitsDisabled"],
+  "timezone": "America/New_York",
+  "schedule": ["before 9am on monday"],
+  "rangeStrategy": "bump",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 9am on the first day of the month"]
+  },
+  "packageRules": [
+    {
+      "description": "TypeScript, oxlint, and oxlint-tsgolint must match @effect/tsgo's support table; `effect-tsgo patch` fails `bun install` otherwise, so bump them as one PR and let CI decide.",
+      "matchPackageNames": ["@effect/tsgo", "typescript", "oxlint", "oxlint-tsgolint"],
+      "groupName": "effect-tsgo toolchain",
+      "rangeStrategy": "pin",
+      "schedule": ["at any time"]
+    },
+    {
+      "description": "Daily prerelease builds published under the `latest` dist-tag. A semver range resolves to the stale `0.0.0-dev` stub, so track the tag instead.",
+      "matchPackageNames": ["@ampcode/plugin"],
+      "groupName": "@ampcode/plugin",
+      "rangeStrategy": "pin",
+      "followTag": "latest",
+      "schedule": ["before 9am on monday"]
+    },
+    {
+      "description": "Effect 4 release candidates rename APIs between rcs; every bump must arrive as a CI-checked PR.",
+      "matchPackageNames": ["effect"],
+      "groupName": "effect",
+      "schedule": ["at any time"]
+    },
+    {
+      "description": "Tooling that is not coupled to anything else.",
+      "matchPackageNames": ["@types/bun", "dprint"],
+      "groupName": "dev tooling"
+    }
+  ]
+}

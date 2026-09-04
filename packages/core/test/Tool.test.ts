@@ -1,5 +1,5 @@
 import type { PluginAPI, PluginToolContext, PluginToolDefinition } from "@ampcode/plugin"
-import { describe, expect, test } from "bun:test"
+import { describe, expect, it, test } from "@scenesystems/amp-plugin-testing"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -85,46 +85,60 @@ describe("Tool.toPluginTool", () => {
   })
 })
 
+describe("Tool.make", () => {
+  it.effect("execute is a plain Effect that can run under the test environment", () =>
+    Effect.gen(function*() {
+      expect(yield* Echo.execute({ message: "hi", times: 3 }, ctx)).toBe("hihihi")
+    }))
+})
+
+/** A fake `PluginAPI` that records registrations, dispose callbacks, and log calls. */
+const makeFakeApi = () => {
+  const registered: Array<PluginToolDefinition> = []
+  const disposers: Array<() => void | Promise<void>> = []
+  const logs: Array<unknown> = []
+  const api = {
+    logger: { log: (...args: Array<unknown>) => logs.push(args) },
+    registerTool: (definition: PluginToolDefinition) => {
+      registered.push(definition)
+      return { unsubscribe: () => {} }
+    },
+    onDispose: (callback: () => void | Promise<void>) => {
+      disposers.push(callback)
+      return { unsubscribe: () => {} }
+    }
+  } as unknown as PluginAPI
+  return { api, registered, disposers, logs }
+}
+
 describe("Runtime.make + Tool.registerAll", () => {
-  test("provides Amp to tools and disposes on plugin dispose", async () => {
-    const registered: Array<PluginToolDefinition> = []
-    const disposers: Array<() => void | Promise<void>> = []
-    const logs: Array<unknown> = []
-    const api = {
-      logger: { log: (...args: Array<unknown>) => logs.push(args) },
-      registerTool: (definition: PluginToolDefinition) => {
-        registered.push(definition)
-        return { unsubscribe: () => {} }
-      },
-      onDispose: (callback: () => void | Promise<void>) => {
-        disposers.push(callback)
-        return { unsubscribe: () => {} }
-      }
-    } as unknown as PluginAPI
+  it.live("provides Amp to tools and disposes on plugin dispose", () =>
+    Effect.gen(function*() {
+      const { api, disposers, logs, registered } = makeFakeApi()
 
-    class Greeting extends Context.Service<Greeting, { readonly prefix: string }>()("Greeting", {
-      make: Effect.map(Amp.Amp, (amp) => ({ prefix: typeof amp.logger.log === "function" ? "hello" : "?" }))
-    }) {}
+      class Greeting extends Context.Service<Greeting, { readonly prefix: string }>()("Greeting", {
+        make: Effect.map(Amp.Amp, (amp) => ({ prefix: typeof amp.logger.log === "function" ? "hello" : "?" }))
+      }) {}
 
-    const Greet = Tool.make({
-      name: "greet",
-      description: "Greets",
-      input: Schema.Struct({ name: Schema.String }),
-      execute: ({ name }) =>
-        Effect.gen(function*() {
-          const { prefix } = yield* Greeting
-          yield* Amp.log("greeting", name)
-          return `${prefix} ${name}`
-        })
-    })
+      const Greet = Tool.make({
+        name: "greet",
+        description: "Greets",
+        input: Schema.Struct({ name: Schema.String }),
+        execute: ({ name }) =>
+          Effect.gen(function*() {
+            const { prefix } = yield* Greeting
+            yield* Amp.log("greeting", name)
+            return `${prefix} ${name}`
+          })
+      })
 
-    const runtime = Runtime.make(api, Layer.effect(Greeting)(Greeting.make))
-    Tool.registerAll(api, runtime, [Greet])
+      const runtime = Runtime.make(api, Layer.effect(Greeting)(Greeting.make))
+      Tool.registerAll(api, runtime, [Greet])
 
-    expect(registered.map((d) => d.name)).toEqual(["greet"])
-    expect(await registered[0]!.execute({ name: "ari" }, ctx)).toBe("hello ari")
-    expect(logs).toEqual([["greeting", "ari"]])
-    expect(disposers).toHaveLength(1)
-    await disposers[0]!()
-  })
+      expect(registered.map((d) => d.name)).toEqual(["greet"])
+      expect(yield* Effect.promise(() => registered[0]!.execute({ name: "ari" }, ctx))).toBe("hello ari")
+      expect(logs).toEqual([["greeting", "ari"]])
+      expect(disposers).toHaveLength(1)
+      yield* Effect.promise(async () => disposers[0]!())
+    }))
 })

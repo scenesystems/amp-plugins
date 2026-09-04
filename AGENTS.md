@@ -7,7 +7,9 @@ Bun workspace of Amp plugins written in Effect 4. Read `README.md` for layout an
 - `bun install` — installs and runs `effect-tsgo patch` (required; never skip the `prepare` script).
 - `bun run check` — `tsc -b tsconfig.json` (TypeScript 7 / tsgo). Add new packages to the root `tsconfig.json` references.
 - `bun run lint` / `bun run lint:fix` — oxlint (type-aware, Effect rules) then dprint.
-- `bun test` — Bun's test runner. Tests live in `test/*.test.ts` next to `src/`.
+- `bun test` — Bun's test runner. Tests live in `test/*.test.ts` next to `src/`. Write Effect tests with
+  `it.effect`/`it.live`/`it.layer`/`it.prop` from `@scenesystems/amp-plugin-testing` (`packages/testing`), not with
+  hand-rolled `Effect.runPromise`; use plain `test` only for Promise-returning boundaries such as `PluginToolDefinition.execute`.
 - `bun run build [name]` — bundles `plugins/*` to `dist/<name>/`. Run after changing a plugin entry point.
 - `bun run ci` — everything above, in order. Run before committing.
 
@@ -28,6 +30,10 @@ Bun workspace of Amp plugins written in Effect 4. Read `README.md` for layout an
   Log via `Amp.log` or `Effect.log`; `console` is a lint error in plugin code.
 - Formatting is dprint (Effect style: no semicolons, double quotes, no trailing commas, 120 columns). Run
   `bun run format` instead of hand-formatting.
-- Exact dependency versions only (`bunfig.toml` sets `exact = true`). `typescript`, `oxlint`, `oxlint-tsgolint`, and
-  `@effect/tsgo` must be bumped together to versions listed in `@effect/tsgo`'s README support table.
+- Dependency versions follow README "Dependency versions": `effect`, `@types/bun`, `dprint` use `^` ranges;
+  `@ampcode/plugin` and the toolchain (`typescript`, `oxlint`, `oxlint-tsgolint`, `@effect/tsgo`) are exact. Bump the
+  toolchain together to versions on `@effect/tsgo`'s support table (`bun install` fails otherwise). Never write
+  `@ampcode/plugin` as a range: it resolves to the stale `0.0.0-dev`. Renovate (`renovate.json`) opens upgrade PRs.
+- Effect 4 renames between release candidates (e.g. `Effect.fork` → `Effect.forkChild`, `ServiceMap` → `Context`).
+  After an `effect` bump, fix `bun run check` errors by reading the new `.d.ts`, not by pinning back.
 - Never commit `dist/`, credentials, or `.env` files. Google credentials come from Amp secrets as environment variables.

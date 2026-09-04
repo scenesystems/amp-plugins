@@ -37,6 +37,7 @@ To try a build inside Amp without installing it, copy `dist/<plugin>/` into `~/.
 
 ```
 packages/core/            @scenesystems/amp-plugin-core — Effect ↔ Amp Plugin API adapters
+packages/testing/         @scenesystems/amp-plugin-testing — it.effect / it.live / it.layer / it.prop for bun:test
 plugins/<name>/           one directory plugin per package
   src/index.ts            plugin entry: `export const description` + default export
   skills/<skill>/SKILL.md bundled Agent Skills (optional)
@@ -48,15 +49,46 @@ scripts/build.ts          bundles plugins/* → dist/*
 `Runtime.make` (a `ManagedRuntime` from your `Layer`, disposed with the plugin), and the `Amp` service exposing the
 `PluginAPI` inside Effect code.
 
+### Testing
+
+Tests run with `bun test`, the same runtime Amp loads plugins into. `@scenesystems/amp-plugin-testing` provides the
+[`@effect/vitest`](https://github.com/Effect-TS/effect-smol/tree/main/packages/vitest) API on top of `bun:test` and the
+runner-agnostic `effect/testing` modules:
+
+```ts
+import { describe, expect, it, TestClock } from "@scenesystems/amp-plugin-testing"
+
+it.effect("name", () => Effect.gen(function*() { ... }))   // TestClock (frozen; TestClock.adjust) + TestConsole
+it.live("name", () => ...)                                 // real clock and console
+it.layer(MyLayer)("suite", (it) => { it.effect(...) })     // MyLayer built once per suite, released in afterAll
+it.prop("name", [Schema.String, FastCheck.integer()], ([s, n]) => ...)   // property-based, Schema → arbitrary
+```
+
+Why not `@effect/vitest`? It is thin glue between `effect/testing` and vitest internals, and vitest runs on Node, so
+plugin tests would execute on a different runtime than the plugin. Test failures are rethrown with Effect's pretty
+stack traces so Bun points at the failing line.
+
 ### Toolchain
 
 Mirrors the [Effect repository](https://github.com/Effect-TS/effect-smol): TypeScript 7 (`typescript@7`, the Go
 compiler) with [`@effect/tsgo`](https://github.com/Effect-TS/tsgo) providing the Effect language service, `oxlint` with
-the Effect type-aware rule preset, and `dprint` for formatting. Versions of `typescript`, `oxlint`, `oxlint-tsgolint`,
-and `@effect/tsgo` are pinned exactly because `@effect/tsgo` patches the other three and validates their versions.
+the Effect type-aware rule preset, and `dprint` for formatting.
 
 Editor setup: install the recommended VS Code extensions in `.vscode/extensions.json` (TypeScript Native Preview,
 Effect, dprint, oxc).
+
+### Dependency versions
+
+`bun.lock` (installed with `--frozen-lockfile` in CI) makes every install reproducible; `package.json` ranges say what
+we intend to accept. Upgrades arrive as CI-checked pull requests from [Renovate](https://docs.renovatebot.com/) using
+`renovate.json` (enable the Mend Renovate GitHub App on the repository), never as silent floats.
+
+| Dependency                                                | Range | Why                                                                                                                                                                                                                            |
+| --------------------------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `typescript`, `oxlint`, `oxlint-tsgolint`, `@effect/tsgo` | exact | `effect-tsgo patch` runs on `bun install` and fails if the versions are not on `@effect/tsgo`'s support table, so they are bumped together in one grouped PR that CI either accepts or rejects.                                |
+| `@ampcode/plugin`                                         | exact | Published daily as `0.0.0-<date>-<sha>` under the `latest` dist-tag. A semver range resolves to the stale `0.0.0-dev` stub (alphanumeric prerelease identifiers sort above numeric ones), so Renovate follows the tag instead. |
+| `effect`                                                  | `^`   | `^4.0.0-rc.N` accepts later release candidates, `4.0.0`, and `4.x`. Release candidates have renamed APIs, so each bump is a PR; Renovate's `rangeStrategy: bump` keeps the range's lower bound at the version actually tested. |
+| `@types/bun`, `dprint`                                    | `^`   | Not coupled to anything.                                                                                                                                                                                                       |
 
 ## Contributing a plugin
 

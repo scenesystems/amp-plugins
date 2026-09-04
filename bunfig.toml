@@ -1,8 +1,5 @@
 # Bun configuration for the workspace. https://bun.sh/docs/runtime/bunfig
-
-[install]
-# Pin exact versions on `bun add`; the Effect tsgo/oxlint/tsgolint versions must match each other.
-exact = true
+# Dependency ranges are set per package in package.json (see README "Dependency versions"); `bun.lock` pins installs.
 
 [test]
 # Test files live next to the code they test (`*.test.ts`) or under `test/`.

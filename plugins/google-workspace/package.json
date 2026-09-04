@@ -14,9 +14,10 @@
   },
   "dependencies": {
     "@scenesystems/amp-plugin-core": "workspace:*",
-    "effect": "4.0.0-rc.112"
+    "effect": "^4.0.0-rc.112"
   },
   "devDependencies": {
-    "@ampcode/plugin": "0.0.0-20260904001652-g2bd7889"
+    "@ampcode/plugin": "0.0.0-20260904001652-g2bd7889",
+    "@scenesystems/amp-plugin-testing": "workspace:*"
   }
 }
