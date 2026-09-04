@@ -84,14 +84,15 @@ const makeTester = <R>(
 ): Tester<R> => {
   const run = <A, E>(self: () => Effect.Effect<A, E, R>) => runTest(mapEffect(Effect.suspend(self)))
   // Bun passes a `done` callback to any test function with a declared parameter; keep these zero-arity.
-  const withTest = (t: typeof B.test): TestCase<R> => (name, self, timeout) => t(name, () => run(self), timeout)
-  const f: TestCase<R> = withTest(test)
+  // `t` is resolved per call: bun's `test.only` is a getter that throws under CI=true, so it must not be read eagerly.
+  const withTest = (t: () => typeof B.test): TestCase<R> => (name, self, timeout) => t()(name, () => run(self), timeout)
+  const f: TestCase<R> = withTest(() => test)
   return Object.assign(f, {
-    skip: withTest(test.skip),
-    only: withTest(test.only),
-    failing: withTest(test.failing),
-    skipIf: (condition: boolean) => withTest(test.skipIf(condition)),
-    runIf: (condition: boolean) => withTest(test.if(condition)),
+    skip: withTest(() => test.skip),
+    only: withTest(() => test.only),
+    failing: withTest(() => test.failing),
+    skipIf: (condition: boolean) => withTest(() => test.skipIf(condition)),
+    runIf: (condition: boolean) => withTest(() => test.if(condition)),
     each:
       <T>(cases: ReadonlyArray<T>) =>
       <A, E>(name: string, self: (case_: T) => Effect.Effect<A, E, R>, timeout?: Timeout) =>
