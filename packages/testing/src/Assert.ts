@@ -11,8 +11,6 @@
  * reason, so two structurally equal causes are never `Equal.equals`. Comparing the extracted error
  * with `assertEquals` (which understands `Equal`, `Option`, `Redacted`, and `Data` errors) is exact
  * and stable.
- *
- * @since 0.2.0
  */
 import * as Assert from "@effect/vitest/utils"
 import * as Cause from "effect/Cause"
@@ -42,7 +40,6 @@ const onlyReason = <A, E>(
  *
  * Throws when the effect succeeded, died, was interrupted, or failed for more than one reason.
  *
- * @since 0.2.0
  * @category extractors
  */
 export const failureOf = <A, E>(exit: Exit.Exit<A, E>): E => {
@@ -58,7 +55,6 @@ export const failureOf = <A, E>(exit: Exit.Exit<A, E>): E => {
  *
  * Throws when the effect succeeded, failed with a typed error, was interrupted, or died for more than one reason.
  *
- * @since 0.2.0
  * @category extractors
  */
 export const defectOf = <A, E>(exit: Exit.Exit<A, E>): unknown => {
@@ -75,7 +71,6 @@ export const defectOf = <A, E>(exit: Exit.Exit<A, E>): unknown => {
  * Equality is `Equal.equals`, so `Data.TaggedError` instances compare by their fields (including
  * `hint`), `Option`s by content, and `Redacted` values by the secret they wrap.
  *
- * @since 0.2.0
  * @category assertions
  */
 export const assertFails = <A, E>(exit: Exit.Exit<A, E>, expected: E, message?: string): void => {
@@ -85,7 +80,6 @@ export const assertFails = <A, E>(exit: Exit.Exit<A, E>, expected: E, message?: 
 /**
  * Asserts that `exit` succeeded with exactly `expected`, using `Equal.equals`.
  *
- * @since 0.2.0
  * @category assertions
  */
 export const assertSucceeds = <A, E>(exit: Exit.Exit<A, E>, expected: A, message?: string): void => {
@@ -99,7 +93,6 @@ export const assertSucceeds = <A, E>(exit: Exit.Exit<A, E>, expected: A, message
  * Asserts that none of `secrets` appears when `value` is rendered the way a log line, an error
  * message, or a thrown exception would render it (`node:util` `inspect` plus `String(value)`).
  *
- * @since 0.2.0
  * @category assertions
  */
 export const assertRedacted = (value: unknown, secrets: ReadonlyArray<string>): void => {

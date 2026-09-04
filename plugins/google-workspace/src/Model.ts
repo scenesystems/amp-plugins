@@ -1,15 +1,12 @@
 /**
  * Schemas for the subset of Drive v3, Sheets v4, and Docs v1 payloads the plugin reads.
  * Unknown keys are dropped on decode, so these stay small even as Google adds fields.
- *
- * @since 0.1.0
  */
 import * as Schema from "effect/Schema"
 
 /**
  * Google-native MIME types.
  *
- * @since 0.1.0
  * @category constants
  */
 export const MIME = {
@@ -28,7 +25,6 @@ const Person = Schema.Struct({
 /**
  * A Drive file resource, restricted to `FILE_FIELDS`.
  *
- * @since 0.1.0
  * @category models
  */
 export class DriveFile extends Schema.Class<DriveFile>("DriveFile")({
@@ -55,14 +51,12 @@ export class DriveFile extends Schema.Class<DriveFile>("DriveFile")({
 /**
  * The `fields` projection requested for every file read, matching `DriveFile`.
  *
- * @since 0.1.0
  * @category constants
  */
 export const FILE_FIELDS =
   "id,name,mimeType,modifiedTime,createdTime,webViewLink,owners(emailAddress,displayName),lastModifyingUser(emailAddress,displayName),parents,size,description,shortcutDetails(targetId,targetMimeType),driveId"
 
 /**
- * @since 0.1.0
  * @category models
  */
 export const FileList = Schema.Struct({
@@ -71,7 +65,6 @@ export const FileList = Schema.Struct({
 })
 
 /**
- * @since 0.1.0
  * @category models
  */
 export const About = Schema.Struct({
@@ -89,7 +82,6 @@ const CommentReply = Schema.Struct({
 /**
  * A Drive comment with its replies.
  *
- * @since 0.1.0
  * @category models
  */
 export class DriveComment extends Schema.Class<DriveComment>("DriveComment")({
@@ -107,14 +99,12 @@ export class DriveComment extends Schema.Class<DriveComment>("DriveComment")({
 /**
  * The `fields` projection for comment listings, matching `DriveComment`.
  *
- * @since 0.1.0
  * @category constants
  */
 export const COMMENT_FIELDS =
   "nextPageToken,comments(id,author(displayName,emailAddress,me),content,quotedFileContent(value),resolved,deleted,createdTime,modifiedTime,replies(id,author(displayName,emailAddress),content,action,createdTime))"
 
 /**
- * @since 0.1.0
  * @category models
  */
 export const CommentList = Schema.Struct({
@@ -123,7 +113,6 @@ export const CommentList = Schema.Struct({
 })
 
 /**
- * @since 0.1.0
  * @category models
  */
 export const SheetTab = Schema.Struct({
@@ -142,7 +131,6 @@ export const SheetTab = Schema.Struct({
 })
 
 /**
- * @since 0.1.0
  * @category models
  */
 export type SheetTab = typeof SheetTab.Type
@@ -150,7 +138,6 @@ export type SheetTab = typeof SheetTab.Type
 /**
  * Spreadsheet metadata: title, URL, and tabs.
  *
- * @since 0.1.0
  * @category models
  */
 export class Spreadsheet extends Schema.Class<Spreadsheet>("Spreadsheet")({
@@ -163,7 +150,6 @@ export class Spreadsheet extends Schema.Class<Spreadsheet>("Spreadsheet")({
 /**
  * The `fields` projection for spreadsheet metadata, matching `Spreadsheet`.
  *
- * @since 0.1.0
  * @category constants
  */
 export const SPREADSHEET_FIELDS =
@@ -172,31 +158,26 @@ export const SPREADSHEET_FIELDS =
 /**
  * A single cell as returned by (or accepted by) the Sheets values API.
  *
- * @since 0.1.0
  * @category models
  */
 export const CellValue = Schema.Union([Schema.String, Schema.Finite, Schema.Boolean, Schema.Null])
 
 /**
- * @since 0.1.0
  * @category models
  */
 export type CellValue = typeof CellValue.Type
 
 /**
- * @since 0.1.0
  * @category models
  */
 export const Rows = Schema.Array(Schema.Array(CellValue))
 
 /**
- * @since 0.1.0
  * @category models
  */
 export type Rows = typeof Rows.Type
 
 /**
- * @since 0.1.0
  * @category models
  */
 export const ValueRange = Schema.Struct({
@@ -206,7 +187,6 @@ export const ValueRange = Schema.Struct({
 /**
  * Result of a Sheets `values.update`.
  *
- * @since 0.1.0
  * @category models
  */
 export const UpdateResult = Schema.Struct({
@@ -219,7 +199,6 @@ export const UpdateResult = Schema.Struct({
 /**
  * Result of a Sheets `values.append`.
  *
- * @since 0.1.0
  * @category models
  */
 export const AppendResult = Schema.Struct({
@@ -229,7 +208,6 @@ export const AppendResult = Schema.Struct({
 /**
  * The end indexes of a Google Doc body, used to find the append position.
  *
- * @since 0.1.0
  * @category models
  */
 export const DocumentBody = Schema.Struct({
@@ -243,7 +221,6 @@ export const DocumentBody = Schema.Struct({
 /**
  * Error envelope returned by Google APIs on non-2xx responses.
  *
- * @since 0.1.0
  * @category models
  */
 export const ErrorBody = Schema.Struct({
@@ -259,7 +236,6 @@ export const ErrorBody = Schema.Struct({
 /**
  * OAuth2 token endpoint success body.
  *
- * @since 0.1.0
  * @category models
  */
 export const TokenResponse = Schema.Struct({
@@ -270,7 +246,6 @@ export const TokenResponse = Schema.Struct({
 /**
  * OAuth2 token endpoint error body.
  *
- * @since 0.1.0
  * @category models
  */
 export const TokenError = Schema.Struct({

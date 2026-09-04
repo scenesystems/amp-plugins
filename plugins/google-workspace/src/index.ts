@@ -2,8 +2,6 @@
  * Google Workspace plugin for Amp: Drive search, Docs as Markdown, Sheets ranges, comments.
  *
  * Every tool is an Effect (`Tool.make`) run on a `ManagedRuntime` built from `layer`.
- *
- * @since 0.1.0
  */
 import type { PluginAPI } from "@ampcode/plugin"
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
@@ -24,7 +22,6 @@ export const description =
  * Services the tools run against: the Google API client over `GoogleAuth` over Effect's fetch client
  * and Bun's file system (for `GOOGLE_SERVICE_ACCOUNT_KEY_FILE`).
  *
- * @since 0.1.0
  * @category layers
  */
 export const layer: Layer.Layer<Tools.Services, never, Amp.Amp> = Google.layer.pipe(
@@ -36,7 +33,6 @@ export const layer: Layer.Layer<Tools.Services, never, Amp.Amp> = Google.layer.p
  * Body of the `check-credentials` command: the resolved credential and the identity Drive sees,
  * or the rendered configuration problem. Never fails; every error becomes text for the user.
  *
- * @since 0.1.0
  * @category commands
  */
 export const checkCredentials: Effect.Effect<string, never, Tools.Services> = Effect.gen(function*() {

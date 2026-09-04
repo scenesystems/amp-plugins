@@ -15,8 +15,6 @@
  *   Tool.registerAll(api, runtime, [Echo])
  * }
  * ```
- *
- * @since 0.1.0
  */
 import type {
   PluginAPI,
@@ -37,7 +35,6 @@ import * as ToolError from "./ToolError.ts"
  * Schemas usable as tool input: any schema whose decoding needs no services,
  * so decoding can run on the plugin runtime without widening its requirements.
  *
- * @since 0.1.0
  * @category models
  */
 export type InputSchema = Schema.Top & { readonly "DecodingServices": never }
@@ -45,7 +42,6 @@ export type InputSchema = Schema.Top & { readonly "DecodingServices": never }
 /**
  * An Amp tool whose input is decoded with `input` and whose body is an Effect.
  *
- * @since 0.1.0
  * @category models
  */
 export interface Tool<in out S extends InputSchema, out E, out R> {
@@ -70,7 +66,6 @@ export interface Tool<in out S extends InputSchema, out E, out R> {
 /**
  * Identity constructor that pins type inference for a tool definition.
  *
- * @since 0.1.0
  * @category constructors
  */
 export const make = <S extends InputSchema, E, R>(tool: Tool<S, E, R>): Tool<S, E, R> => tool
@@ -81,7 +76,6 @@ export const make = <S extends InputSchema, E, R>(tool: Tool<S, E, R>): Tool<S, 
  * Named schemas are inlined so the result is a single self-contained object;
  * tool schemas are small and Amp does not resolve `$defs`.
  *
- * @since 0.1.0
  * @category conversions
  */
 export const toInputSchema = (schema: Schema.Top): PluginToolDefinition["inputSchema"] => {
@@ -100,7 +94,6 @@ export const toInputSchema = (schema: Schema.Top): PluginToolDefinition["inputSc
  * Renders a failed `Cause` as tool result text. Typed failures with a `message`
  * are shown tersely; anything else (defects, interruptions) gets the full pretty cause.
  *
- * @since 0.1.0
  * @category rendering
  */
 export const renderCause = <E>(cause: Cause.Cause<E>): string => {
@@ -120,7 +113,6 @@ export const renderCause = <E>(cause: Cause.Cause<E>): string => {
  * and failures building the runtime's layer all come back to the agent as text so
  * a tool call never rejects.
  *
- * @since 0.1.0
  * @category conversions
  */
 export const toPluginTool =
@@ -148,7 +140,6 @@ export const toPluginTool =
 /**
  * Registers every tool with Amp. The returned subscription disposes all of them.
  *
- * @since 0.1.0
  * @category registration
  */
 export const registerAll = <R>(

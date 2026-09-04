@@ -4,8 +4,6 @@
  * Any failure whose value carries a string `message` (including `ToolError`,
  * `SchemaError`, and plain `Error`s) is rendered for the model by `Tool.toPluginTool`.
  * Use `ToolError` when you want to attach a remediation hint.
- *
- * @since 0.1.0
  */
 import * as Data from "effect/Data"
 
@@ -19,7 +17,6 @@ import * as Data from "effect/Data"
  * })
  * ```
  *
- * @since 0.1.0
  * @category errors
  */
 export class ToolError extends Data.TaggedError("ToolError")<{
@@ -31,7 +28,6 @@ export class ToolError extends Data.TaggedError("ToolError")<{
  * Renders an error value as text for the agent. Returns `undefined` when the
  * value carries no usable `message`, so callers can fall back to a full cause dump.
  *
- * @since 0.1.0
  * @category rendering
  */
 export const render = (error: unknown): string | undefined => {

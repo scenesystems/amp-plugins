@@ -1,8 +1,6 @@
 /**
  * Builds the plugin's `ManagedRuntime` from a `Layer`, with the `Amp` service
  * provided and disposal tied to Amp unloading the plugin.
- *
- * @since 0.1.0
  */
 import type { PluginAPI } from "@ampcode/plugin"
 import * as Layer from "effect/Layer"
@@ -15,7 +13,6 @@ import * as Amp from "./Amp.ts"
  * when the first tool runs, so a misconfigured plugin still loads and reports a
  * readable failure instead of crashing Amp.
  *
- * @since 0.1.0
  * @category constructors
  */
 export const make = <R, E>(

@@ -1,8 +1,6 @@
 /**
  * Typed wrappers over the Drive v3, Sheets v4, and Docs v1 REST APIs on Effect's `HttpClient`.
  * Every call carries a bearer token from `GoogleAuth`; a 401 invalidates the token and retries once.
- *
- * @since 0.1.0
  */
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
@@ -24,7 +22,6 @@ const DOCS = "https://docs.googleapis.com/v1"
 /**
  * A non-2xx response from a Google API, or a transport/decoding failure (status 0).
  *
- * @since 0.1.0
  * @category errors
  */
 export class GoogleApiError extends Data.TaggedError("GoogleApiError")<{
@@ -36,7 +33,6 @@ export class GoogleApiError extends Data.TaggedError("GoogleApiError")<{
 /**
  * Failures a Google call can produce.
  *
- * @since 0.1.0
  * @category errors
  */
 export type Error = GoogleApiError | CredentialError
@@ -44,7 +40,6 @@ export type Error = GoogleApiError | CredentialError
 /**
  * Service shape.
  *
- * @since 0.1.0
  * @category models
  */
 export interface Shape {
@@ -90,7 +85,6 @@ export interface Shape {
 }
 
 /**
- * @since 0.1.0
  * @category services
  */
 export class Google extends Context.Service<Google, Shape>()("@scenesystems/google-workspace/Google") {}
@@ -119,7 +113,6 @@ const encode = encodeURIComponent
 /**
  * Builds the service from `GoogleAuth` and an `HttpClient`.
  *
- * @since 0.1.0
  * @category constructors
  */
 export const make: Effect.Effect<Shape, never, GoogleAuth | HttpClient.HttpClient> = Effect.gen(function*() {
@@ -319,7 +312,6 @@ export const make: Effect.Effect<Shape, never, GoogleAuth | HttpClient.HttpClien
 })
 
 /**
- * @since 0.1.0
  * @category layers
  */
 export const layer: Layer.Layer<Google, never, GoogleAuth | HttpClient.HttpClient> = Layer.effect(Google)(make)

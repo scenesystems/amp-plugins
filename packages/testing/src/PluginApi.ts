@@ -5,8 +5,6 @@
  * Only the members the plugins in this repository use are implemented. Touching any other member
  * throws immediately, so a plugin that starts depending on more of the API fails its tests loudly
  * instead of receiving `undefined`.
- *
- * @since 0.2.0
  */
 import type {
   CommandAvailability,
@@ -26,7 +24,6 @@ import { inspect } from "node:util"
 /**
  * A command as the plugin registered it.
  *
- * @since 0.2.0
  * @category models
  */
 export interface RegisteredCommand {
@@ -39,7 +36,6 @@ export interface RegisteredCommand {
 /**
  * Everything observable about a plugin's interaction with the fake API.
  *
- * @since 0.2.0
  * @category models
  */
 export interface Fake {
@@ -69,7 +65,6 @@ export interface Fake {
 }
 
 /**
- * @since 0.2.0
  * @category models
  */
 export interface Options {
@@ -81,7 +76,6 @@ export interface Options {
  * The text of a tool result. Throws when the tool returned content blocks or nothing, so a test
  * that asserts on rendered text cannot pass by accident when the result shape changes.
  *
- * @since 0.2.0
  * @category accessors
  */
 export const text = (result: PluginToolResult | void): string => {
@@ -92,7 +86,6 @@ export const text = (result: PluginToolResult | void): string => {
 /**
  * A `User` with only `email` set to something meaningful.
  *
- * @since 0.2.0
  * @category constructors
  */
 export const user = (email: string): User => ({
@@ -115,7 +108,6 @@ const strict = <T extends object>(name: string, implemented: Partial<T>): T =>
 /**
  * Creates a fresh fake API. Each call is independent; nothing is shared across tests.
  *
- * @since 0.2.0
  * @category constructors
  */
 export const make = (options: Options = {}): Fake => {

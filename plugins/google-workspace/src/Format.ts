@@ -1,7 +1,5 @@
 /**
  * Pure helpers: file reference parsing, Drive query building, and Markdown rendering.
- *
- * @since 0.1.0
  */
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
@@ -14,7 +12,6 @@ import { MIME } from "./Model.ts"
 /**
  * A resolved Drive file reference: the file ID plus the sheet tab `gid` when the URL carried one.
  *
- * @since 0.1.0
  * @category models
  */
 export interface FileRef {
@@ -35,7 +32,6 @@ const PATH_PATTERNS = [
 /**
  * Parses a raw Drive file ID or any docs.google.com / drive.google.com URL.
  *
- * @since 0.1.0
  * @category parsing
  */
 export const parseFileRef = (input: string): Option.Option<FileRef> => {
@@ -72,7 +68,6 @@ const FileRefStruct = Schema.Struct({
  * The description is attached to the string side, which is what `Tool.toInputSchema` turns into
  * JSON Schema; annotating the transformation itself would not reach the agent.
  *
- * @since 0.1.0
  * @category schemas
  */
 export const FileRef = (
@@ -97,7 +92,6 @@ export const FileRef = (
 /**
  * Builds a Drive `q` expression, escaping user-provided strings.
  *
- * @since 0.1.0
  * @category parsing
  */
 export const driveQuery = (parts: {
@@ -130,7 +124,6 @@ const queryLiteral = (value: string): string => `'${value.replace(/\\/g, "\\\\")
 /**
  * Human-readable kind for a file's MIME type.
  *
- * @since 0.1.0
  * @category rendering
  */
 export const kindOf = (file: Pick<DriveFile, "mimeType">): string => {
@@ -151,7 +144,6 @@ export const kindOf = (file: Pick<DriveFile, "mimeType">): string => {
 /**
  * One search-result entry.
  *
- * @since 0.1.0
  * @category rendering
  */
 export const formatFileLine = (file: DriveFile): string => {
@@ -167,7 +159,6 @@ export const formatFileLine = (file: DriveFile): string => {
 /**
  * Markdown header block describing a file.
  *
- * @since 0.1.0
  * @category rendering
  */
 export const formatFileHeader = (file: DriveFile): string => {
@@ -187,7 +178,6 @@ export const formatFileHeader = (file: DriveFile): string => {
 /**
  * One line per spreadsheet tab with its gid and grid size.
  *
- * @since 0.1.0
  * @category rendering
  */
 export const describeTab = (sheet: SheetTab): string => {
@@ -201,7 +191,6 @@ const cellText = (value: CellValue | undefined): string => value === null || val
 /**
  * Spreadsheet column letter for a zero-based index: 0 → A, 26 → AA.
  *
- * @since 0.1.0
  * @category rendering
  */
 export const columnLetter = (index: number): string => {
@@ -217,7 +206,6 @@ export const columnLetter = (index: number): string => {
 /**
  * Renders rows as a Markdown table. Ragged rows are padded; pipes and newlines are escaped.
  *
- * @since 0.1.0
  * @category rendering
  */
 export const toMarkdownTable = (rows: Rows, options: { readonly headerRow?: boolean | undefined } = {}): string => {
@@ -238,7 +226,6 @@ export const toMarkdownTable = (rows: Rows, options: { readonly headerRow?: bool
 /**
  * Renders rows as RFC 4180 CSV.
  *
- * @since 0.1.0
  * @category rendering
  */
 export const toCsv = (rows: Rows): string => {
@@ -249,7 +236,6 @@ export const toCsv = (rows: Rows): string => {
 /**
  * Quotes a sheet title for an A1 range: `My Tab` → `'My Tab'`.
  *
- * @since 0.1.0
  * @category rendering
  */
 export const quoteSheetTitle = (title: string): string =>
@@ -258,7 +244,6 @@ export const quoteSheetTitle = (title: string): string =>
 /**
  * Renders comments with quoted passages and replies.
  *
- * @since 0.1.0
  * @category rendering
  */
 export const formatComments = (comments: ReadonlyArray<DriveComment>): string => {
@@ -286,7 +271,6 @@ export const formatComments = (comments: ReadonlyArray<DriveComment>): string =>
 /**
  * A page of a long text.
  *
- * @since 0.1.0
  * @category models
  */
 export interface Page {
@@ -299,7 +283,6 @@ export interface Page {
 /**
  * Slices `text` for paging. `maxChars` is clamped to at least 1000.
  *
- * @since 0.1.0
  * @category rendering
  */
 export const truncate = (

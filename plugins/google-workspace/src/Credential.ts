@@ -17,8 +17,6 @@
  *
  * When both kinds are configured, the OAuth refresh token wins because it is the more
  * specific (per-person) credential.
- *
- * @since 0.1.0
  */
 import * as Config from "effect/Config"
 import * as Data from "effect/Data"
@@ -31,7 +29,6 @@ import * as Schema from "effect/Schema"
 /**
  * Full Drive scope.
  *
- * @since 0.1.0
  * @category constants
  */
 export const SCOPE_FULL = "https://www.googleapis.com/auth/drive"
@@ -39,7 +36,6 @@ export const SCOPE_FULL = "https://www.googleapis.com/auth/drive"
 /**
  * Read-only Drive scope.
  *
- * @since 0.1.0
  * @category constants
  */
 export const SCOPE_READ_ONLY = "https://www.googleapis.com/auth/drive.readonly"
@@ -49,7 +45,6 @@ const SETUP_HINT = "See the google-workspace skill (reference/setup.md) for setu
 /**
  * Missing, malformed, or rejected Google credentials.
  *
- * @since 0.1.0
  * @category errors
  */
 export class CredentialError extends Data.TaggedError("CredentialError")<{
@@ -60,7 +55,6 @@ export class CredentialError extends Data.TaggedError("CredentialError")<{
 /**
  * A service account key, optionally impersonating `subject` through domain-wide delegation.
  *
- * @since 0.1.0
  * @category models
  */
 export interface ServiceAccount {
@@ -74,7 +68,6 @@ export interface ServiceAccount {
 /**
  * An OAuth client plus a user's refresh token.
  *
- * @since 0.1.0
  * @category models
  */
 export interface OAuthRefresh {
@@ -85,7 +78,6 @@ export interface OAuthRefresh {
 }
 
 /**
- * @since 0.1.0
  * @category models
  */
 export type Credential = ServiceAccount | OAuthRefresh
@@ -93,7 +85,6 @@ export type Credential = ServiceAccount | OAuthRefresh
 /**
  * Human-readable identity of a credential, for whoami/diagnostics. Never includes secrets.
  *
- * @since 0.1.0
  * @category rendering
  */
 export const describe = (credential: Credential): string => {
@@ -107,7 +98,6 @@ export const describe = (credential: Credential): string => {
 /**
  * The identity Google evaluates permissions against, for share-with-this hints.
  *
- * @since 0.1.0
  * @category rendering
  */
 export const identity = (credential: Credential): string =>
@@ -130,7 +120,6 @@ const decodeFlag = Schema.decodeUnknownEffect(Schema.Struct({ [READ_ONLY]: Confi
  * Whether `GOOGLE_WORKSPACE_READ_ONLY` is set to a truthy value (`true`, `yes`, `on`, `1`, `y`).
  * Unset or blank means `false`; any other value is a configuration error.
  *
- * @since 0.1.0
  * @category config
  */
 export const readOnly: Config.Config<boolean> = optionalString(READ_ONLY).pipe(
@@ -149,7 +138,6 @@ export const readOnly: Config.Config<boolean> = optionalString(READ_ONLY).pipe(
 /**
  * The Drive scope to request: read-only when `GOOGLE_WORKSPACE_READ_ONLY` is set.
  *
- * @since 0.1.0
  * @category config
  */
 export const scope: Config.Config<string> = Config.map(readOnly, (ro) => ro ? SCOPE_READ_ONLY : SCOPE_FULL)
@@ -197,7 +185,6 @@ const readKeyFile = (path: string): Effect.Effect<Redacted.Redacted, CredentialE
 /**
  * Options for resolving a credential.
  *
- * @since 0.1.0
  * @category models
  */
 export interface ResolveOptions {
@@ -210,7 +197,6 @@ export interface ResolveOptions {
  * Key files are read through the `FileSystem` service. Fails with `CredentialError` when nothing is
  * configured or the configuration is inconsistent.
  *
- * @since 0.1.0
  * @category constructors
  */
 export const resolve = (

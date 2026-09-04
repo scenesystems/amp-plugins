@@ -1,7 +1,5 @@
 /**
  * The Google Workspace tool set.
- *
- * @since 0.1.0
  */
 import { Tool, ToolError } from "@scenesystems/amp-plugin-core"
 import * as Effect from "effect/Effect"
@@ -16,7 +14,6 @@ import * as Model from "./Model.ts"
 /**
  * Services every tool runs against.
  *
- * @since 0.1.0
  * @category models
  */
 export type Services = Google | GoogleAuth
@@ -27,7 +24,6 @@ const ENABLE_APIS_HINT =
 /**
  * Turns Google/credential failures into `ToolError`s with a remediation hint the agent can act on.
  *
- * @since 0.1.0
  * @category errors
  */
 export const explain = <A, R>(
@@ -112,7 +108,6 @@ const readFileContent = (file: Model.DriveFile, format: "markdown" | "text") =>
   })
 
 /**
- * @since 0.1.0
  * @category tools
  */
 export const Whoami = Tool.make({
@@ -157,7 +152,6 @@ const mimeTypesFor: Record<typeof SearchType.Type, ReadonlyArray<string> | undef
 }
 
 /**
- * @since 0.1.0
  * @category tools
  */
 export const Search = Tool.make({
@@ -201,7 +195,6 @@ export const Search = Tool.make({
 })
 
 /**
- * @since 0.1.0
  * @category tools
  */
 export const FileInfo = Tool.make({
@@ -226,7 +219,6 @@ export const FileInfo = Tool.make({
 })
 
 /**
- * @since 0.1.0
  * @category tools
  */
 export const ReadDoc = Tool.make({
@@ -265,7 +257,6 @@ export const ReadDoc = Tool.make({
 })
 
 /**
- * @since 0.1.0
  * @category tools
  */
 export const ReadSheet = Tool.make({
@@ -326,7 +317,6 @@ export const ReadSheet = Tool.make({
 })
 
 /**
- * @since 0.1.0
  * @category tools
  */
 export const Comments = Tool.make({
@@ -356,7 +346,6 @@ export const Comments = Tool.make({
 })
 
 /**
- * @since 0.1.0
  * @category tools
  */
 export const WriteSheet = Tool.make({
@@ -390,7 +379,6 @@ export const WriteSheet = Tool.make({
 })
 
 /**
- * @since 0.1.0
  * @category tools
  */
 export const AppendDoc = Tool.make({
@@ -420,7 +408,6 @@ export const AppendDoc = Tool.make({
 })
 
 /**
- * @since 0.1.0
  * @category tools
  */
 export const AddComment = Tool.make({
@@ -448,7 +435,6 @@ export const AddComment = Tool.make({
 /**
  * Every tool, in the order they are registered.
  *
- * @since 0.1.0
  * @category tools
  */
 export const all = [Whoami, Search, FileInfo, ReadDoc, ReadSheet, Comments, WriteSheet, AppendDoc, AddComment] as const

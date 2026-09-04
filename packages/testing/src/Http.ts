@@ -3,8 +3,6 @@
  *
  * Tests assert on the recorded requests exactly (method, full URL with query, headers, decoded
  * body) so a change in how a plugin talks to an API is a test failure, not a silent drift.
- *
- * @since 0.2.0
  */
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -16,7 +14,6 @@ import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 /**
  * A request as the HTTP client saw it. `url` has the query string applied; `request.url` does not.
  *
- * @since 0.2.0
  * @category models
  */
 export interface Recorded {
@@ -27,7 +24,6 @@ export interface Recorded {
 /**
  * Scripted response for the `index`-th request (0-based).
  *
- * @since 0.2.0
  * @category models
  */
 export type Reply = (recorded: Recorded, index: number) => Response
@@ -35,7 +31,6 @@ export type Reply = (recorded: Recorded, index: number) => Response
 /**
  * A stub client: `requests` fills up as the program under test runs; `layer` provides `HttpClient`.
  *
- * @since 0.2.0
  * @category models
  */
 export interface Stub {
@@ -46,7 +41,6 @@ export interface Stub {
 /**
  * A fake `HttpClient` that records every request and answers with `reply`.
  *
- * @since 0.2.0
  * @category constructors
  */
 export const stub = (reply: Reply): Stub => {
@@ -65,7 +59,6 @@ export const stub = (reply: Reply): Stub => {
  * A fake `HttpClient` whose transport fails (DNS, refused connection, ...) with `description`.
  * Requests are still recorded.
  *
- * @since 0.2.0
  * @category constructors
  */
 export const failingTransport = (description: string): Stub => {
@@ -84,21 +77,18 @@ export const failingTransport = (description: string): Stub => {
 }
 
 /**
- * @since 0.2.0
  * @category responses
  */
 export const jsonResponse = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
 
 /**
- * @since 0.2.0
  * @category responses
  */
 export const textResponse = (body: string, status = 200, contentType = "text/plain"): Response =>
   new Response(body, { status, headers: { "content-type": contentType } })
 
 /**
- * @since 0.2.0
  * @category responses
  */
 export const emptyResponse = (status = 204): Response => new Response(null, { status })
@@ -114,7 +104,6 @@ const bodyText = ({ request }: Recorded): string => {
 /**
  * Reads a form-encoded request body back into a record.
  *
- * @since 0.2.0
  * @category readers
  */
 export const formBody = (recorded: Recorded): Record<string, string> =>
@@ -123,7 +112,6 @@ export const formBody = (recorded: Recorded): Record<string, string> =>
 /**
  * Parses a JSON request body.
  *
- * @since 0.2.0
  * @category readers
  */
 export const jsonBody = (recorded: Recorded): unknown => JSON.parse(bodyText(recorded))
@@ -131,7 +119,6 @@ export const jsonBody = (recorded: Recorded): unknown => JSON.parse(bodyText(rec
 /**
  * The request's query parameters as a plain record (repeated keys keep the last value).
  *
- * @since 0.2.0
  * @category readers
  */
 export const query = ({ url }: Recorded): Record<string, string> => Object.fromEntries(url.searchParams)
@@ -139,7 +126,6 @@ export const query = ({ url }: Recorded): Record<string, string> => Object.fromE
 /**
  * `METHOD https://host/path` without the query string, for asserting call sequences compactly.
  *
- * @since 0.2.0
  * @category readers
  */
 export const endpoint = ({ request, url }: Recorded): string => `${request.method} ${url.origin}${url.pathname}`

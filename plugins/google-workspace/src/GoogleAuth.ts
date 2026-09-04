@@ -5,8 +5,6 @@
  * was built (the process environment by default), so a secrets refresh is picked up without
  * reloading the plugin. Tokens are cached until one minute before expiry; concurrent callers
  * share a single mint.
- *
- * @since 0.1.0
  */
 import { Amp } from "@scenesystems/amp-plugin-core"
 import * as Clock from "effect/Clock"
@@ -29,7 +27,6 @@ import { TokenError, TokenResponse } from "./Model.ts"
 /**
  * Service shape.
  *
- * @since 0.1.0
  * @category models
  */
 export interface Shape {
@@ -46,7 +43,6 @@ export interface Shape {
 }
 
 /**
- * @since 0.1.0
  * @category services
  */
 export class GoogleAuth extends Context.Service<GoogleAuth, Shape>()("@scenesystems/google-workspace/GoogleAuth") {}
@@ -62,7 +58,6 @@ const REFRESH_MARGIN_MILLIS = 60_000
  * Services `make` and `layer` need: Amp for the user's email, an HTTP client for the token
  * endpoint, and a file system for `GOOGLE_SERVICE_ACCOUNT_KEY_FILE`.
  *
- * @since 0.2.0
  * @category models
  */
 export type Requirements = Amp.Amp | HttpClient.HttpClient | FileSystem.FileSystem
@@ -97,7 +92,6 @@ const encodeClaims = Schema.encodeSync(JwtClaims)
 /**
  * Builds and signs the RS256 JWT assertion for the service-account token grant.
  *
- * @since 0.1.0
  * @category constructors
  */
 export const signServiceAccountJwt = (
@@ -151,7 +145,6 @@ const summarizeTokenError = (text: string): string => {
  * Builds the service from `Amp` (for the current user's email), an `HttpClient`, and the
  * `FileSystem` used to read key files.
  *
- * @since 0.1.0
  * @category constructors
  */
 export const make: Effect.Effect<Shape, never, Requirements> = Effect.gen(function*() {
@@ -242,7 +235,6 @@ export const make: Effect.Effect<Shape, never, Requirements> = Effect.gen(functi
 })
 
 /**
- * @since 0.1.0
  * @category layers
  */
 export const layer: Layer.Layer<GoogleAuth, never, Requirements> = Layer.effect(GoogleAuth)(make)
