@@ -10,13 +10,51 @@ User or Workspace plugin repository.
 
 ## Install a plugin
 
-Download the built directory for a plugin from the latest CI run (or build it yourself, below), then either:
+Amp does not load plugins from GitHub or npm. It loads them from your **Workspace Plugins** repository (everyone in the
+Amp workspace), your **Personal Plugins** repository (just you), a project's `.amp/plugins/`, or `~/.config/amp/plugins/`
+on one machine. This repository is where plugins are built; a [GitHub Release](../../releases/latest) holds the
+ready-to-install output, one `<plugin>.zip` per plugin. Bundles are self-contained (Effect and shared code inlined), so
+Amp needs no `bun install` to run them.
 
-- add it to one machine: `amp plugins add ./dist/google-workspace`
-- share it with your Amp workspace: copy `dist/google-workspace/` into your Workspace Plugins repository
-  (`amp plugins repositories` prints its URL) and push.
+### Let Amp do it
 
-Bundles are self-contained (Effect and shared code are inlined), so Amp needs no `bun install` to run them.
+Install the bundled skill once, then ask Amp in any thread:
+
+```sh
+amp skill add --global scenesystems/amp-plugins/.agents/skills/installing-amp-plugins
+```
+
+> Install the google-workspace plugin from scenesystems/amp-plugins into our workspace plugins.
+
+The skill downloads the release, copies it into the right plugin repository clone, commits, and asks before pushing.
+
+### By hand
+
+```sh
+# 1. Get the built plugin (stable "latest" URL; or `bun run build` in a clone of this repo)
+curl -fsSL -o google-workspace.zip \
+  https://github.com/scenesystems/amp-plugins/releases/latest/download/google-workspace.zip
+
+# 2. Put it where Amp loads plugins from
+amp plugins repositories                 # prints your Personal and Workspace repositories and clone commands
+amp clone workspace-plugins ~/.cache/amp/repositories/ampcode.com-workspace-plugins   # or user-plugins
+unzip -o google-workspace.zip -d ~/.cache/amp/repositories/ampcode.com-workspace-plugins
+
+# 3. Publish: commit and push in that clone (workspace pushes need workspace admin permission)
+git -C ~/.cache/amp/repositories/ampcode.com-workspace-plugins add google-workspace
+git -C ~/.cache/amp/repositories/ampcode.com-workspace-plugins commit -m "Add google-workspace plugin"
+git -C ~/.cache/amp/repositories/ampcode.com-workspace-plugins push
+```
+
+For one project or one machine instead, unzip into `.amp/plugins/` or `~/.config/amp/plugins/` and run
+`plugins: reload` from Amp's command palette. Each plugin's README lists the secrets it reads (for example
+`GOOGLE_SERVICE_ACCOUNT_KEY`); set them as Amp workspace or personal secrets so they reach the plugin as environment
+variables.
+
+### Releasing (maintainers)
+
+Tag `main` with `vX.Y.Z` and push the tag. `.github/workflows/release.yml` runs `bun run ci`, zips every
+`dist/<plugin>/`, and attaches the zips plus `SHA256SUMS` to a GitHub Release with generated notes.
 
 ## Develop
 

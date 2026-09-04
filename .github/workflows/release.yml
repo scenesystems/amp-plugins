@@ -1,0 +1,52 @@
+name: Release
+
+# Tag a commit `vX.Y.Z` (or run manually) to publish every built plugin as a GitHub Release asset.
+# Assets are named `<plugin>.zip` without the version so the "latest" URL is stable:
+#   https://github.com/scenesystems/amp-plugins/releases/latest/download/<plugin>.zip
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to (re)publish, e.g. v0.1.0
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - run: bun run ci
+      - name: Package plugins
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          for dir in dist/*/; do
+            name=$(basename "$dir")
+            (cd dist && zip -qr "../release/$name.zip" "$name")
+            echo "packaged $name.zip"
+          done
+          (cd release && sha256sum *.zip > SHA256SUMS)
+          cat release/SHA256SUMS
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release/* --clobber
+          else
+            gh release create "$TAG" release/* --title "$TAG" --generate-notes
+          fi
