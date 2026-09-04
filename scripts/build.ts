@@ -57,7 +57,9 @@ const buildPlugin = async (name: string): Promise<void> => {
     target: "bun",
     format: "esm",
     naming: "index.js",
-    sourcemap: "linked",
+    // No source map: it is ~8x the bundle and would be cloned by every plugin-repository reader.
+    // The bundle is unminified, so stack traces stay readable without one.
+    sourcemap: "none",
     minify: false,
     // Types-only package; never needed at runtime.
     external: ["@ampcode/plugin"]
