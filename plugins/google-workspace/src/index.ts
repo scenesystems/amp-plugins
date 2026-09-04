@@ -10,6 +10,7 @@ import * as BunPath from "@effect/platform-bun/BunPath"
 import { type Amp, Runtime, Tool, ToolError } from "@scenesystems/amp-plugin-core"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import * as Credential from "./Credential.ts"
 import * as Google from "./Google.ts"
@@ -49,7 +50,10 @@ export const checkCredentials: Effect.Effect<string, never, Tools.Services> = Ef
   return `Google Workspace: ${Credential.describe(credential)} → Drive sees ${about.user?.emailAddress ?? "unknown"}`
 }).pipe(
   Tools.explain,
-  Effect.catchTag("ToolError", (error) => Effect.succeed(ToolError.render(error) ?? error.message))
+  Effect.catchTag(
+    "ToolError",
+    (error) => Effect.succeed(Option.getOrElse(ToolError.render(error), () => error.message))
+  )
 )
 
 export default function(api: PluginAPI): void {

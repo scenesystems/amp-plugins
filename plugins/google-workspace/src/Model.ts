@@ -15,7 +15,7 @@ export const MIME = {
   slides: "application/vnd.google-apps.presentation",
   folder: "application/vnd.google-apps.folder",
   shortcut: "application/vnd.google-apps.shortcut"
-} as const
+}
 
 const Person = Schema.Struct({
   emailAddress: Schema.optionalKey(Schema.String),

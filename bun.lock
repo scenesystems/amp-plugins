@@ -6,12 +6,15 @@
       "name": "@scenesystems/amp-plugins",
       "devDependencies": {
         "@ampcode/plugin": "0.0.0-20260904001652-g2bd7889",
+        "@effect/platform-bun": "4.0.0-rc.112",
         "@effect/tsgo": "0.41.0",
         "@effect/vitest": "4.0.0-rc.112",
+        "@oxlint/plugins": "1.81.0",
         "@scenesystems/amp-plugin-testing": "workspace:*",
         "@types/bun": "^1.4.0",
         "@types/node": "^24.0.0",
         "dprint": "^0.57.1",
+        "effect": "4.0.0-rc.112",
         "oxlint": "1.81.0",
         "oxlint-tsgolint": "7.0.2001",
         "typescript": "7.0.2",
@@ -169,6 +172,8 @@
     "@oxlint/binding-win32-ia32-msvc": ["@oxlint/binding-win32-ia32-msvc@1.81.0", "", { "os": "win32", "cpu": "ia32" }, "sha512-ksqPP5jbFXcYreEQ7zdJh06rJQBymCTyGRCdaXjfcf2aG4f8KxUWY5wcgYHmaTK+FJ4bPG5sUAdOX+6trnH1JA=="],
 
     "@oxlint/binding-win32-x64-msvc": ["@oxlint/binding-win32-x64-msvc@1.81.0", "", { "os": "win32", "cpu": "x64" }, "sha512-IZuUCwGw9emG5JtCp+fYGB+Z4OWEoeEcM8R5BA1pYw63/ieYFVdcU2ylxTpHbVHSenZnsYE+ZZ20uHAJszQ4cA=="],
+
+    "@oxlint/plugins": ["@oxlint/plugins@1.81.0", "", {}, "sha512-HhD8kd3r6XpelZkhxhRty/po8V6yK1VV63Eq4kSsOS2IoHUywG3DV2EX+z/ZHw46aLI74Y6aA604NRiAqLKW9w=="],
 
     "@rolldown/binding-android-arm-eabi": ["@rolldown/binding-android-arm-eabi@1.2.7", "", { "os": "android", "cpu": "arm" }, "sha512-EypzgnYCwyVY4NDHKzGmNJT5b+XaQEBniHxsMdeIQLB/tcCzZnhqrzHpZFbX9iaxx+5RiB8caATBtfvZP7zVxQ=="],
 

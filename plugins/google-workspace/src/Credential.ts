@@ -62,60 +62,77 @@ export class CredentialError extends Data.TaggedError("CredentialError")<{
 }> {}
 
 /**
- * A service account key, optionally impersonating `subject` through domain-wide delegation.
- *
- * @category models
- */
-export interface ServiceAccount {
-  readonly _tag: "ServiceAccount"
-  readonly clientEmail: string
-  readonly privateKey: Redacted.Redacted
-  readonly tokenUri: string
-  readonly subject: Option.Option<string>
-}
-
-/**
- * An OAuth client plus a user's refresh token.
- *
- * @category models
- */
-export interface OAuthRefresh {
-  readonly _tag: "OAuthRefresh"
-  readonly clientId: string
-  readonly clientSecret: Redacted.Redacted
-  readonly refreshToken: Redacted.Redacted
-}
-
-/**
  * Where the external OIDC token for workload identity federation comes from.
  *
  * @category models
  */
-export type SubjectTokenSource =
+export type SubjectTokenSource = Data.TaggedEnum<{
   /** `amp orb id-token --audience <audience>`; only works inside an Amp orb. */
-  | { readonly _tag: "AmpOrb" }
+  AmpOrb: {}
   /** A file holding one OIDC token (the shape of Google's `credential_source.file`), e.g. from CI. */
-  | { readonly _tag: "File"; readonly path: string }
+  File: { readonly path: string }
+}>
 
 /**
- * Keyless federation: an external OIDC token is exchanged at Google STS and used to impersonate
- * `serviceAccountEmail`, optionally acting as `subject` through domain-wide delegation.
+ * Constructors and matchers for {@link SubjectTokenSource}.
+ *
+ * @category constructors
+ */
+export const SubjectTokenSource = Data.taggedEnum<SubjectTokenSource>()
+
+/**
+ * The three ways the plugin can authenticate to Google.
  *
  * @category models
  */
-export interface WorkloadIdentity {
-  readonly _tag: "WorkloadIdentity"
-  /** `projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>` */
-  readonly provider: string
-  readonly serviceAccountEmail: string
-  readonly subject: Option.Option<string>
-  readonly subjectToken: SubjectTokenSource
-}
+export type Credential = Data.TaggedEnum<{
+  /** An OAuth client plus a user's refresh token. */
+  OAuthRefresh: {
+    readonly clientId: string
+    readonly clientSecret: Redacted.Redacted
+    readonly refreshToken: Redacted.Redacted
+  }
+  /**
+   * Keyless federation: an external OIDC token is exchanged at Google STS and used to impersonate
+   * `serviceAccountEmail`, optionally acting as `subject` through domain-wide delegation.
+   */
+  WorkloadIdentity: {
+    /** `projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>` */
+    readonly provider: string
+    readonly serviceAccountEmail: string
+    readonly subject: Option.Option<string>
+    readonly subjectToken: SubjectTokenSource
+  }
+  /** A service account key, optionally impersonating `subject` through domain-wide delegation. */
+  ServiceAccount: {
+    readonly clientEmail: string
+    readonly privateKey: Redacted.Redacted
+    readonly tokenUri: string
+    readonly subject: Option.Option<string>
+  }
+}>
+
+/**
+ * Constructors and matchers for {@link Credential}.
+ *
+ * @category constructors
+ */
+export const Credential = Data.taggedEnum<Credential>()
 
 /**
  * @category models
  */
-export type Credential = OAuthRefresh | WorkloadIdentity | ServiceAccount
+export type OAuthRefresh = Data.TaggedEnum.Value<Credential, "OAuthRefresh">
+
+/**
+ * @category models
+ */
+export type WorkloadIdentity = Data.TaggedEnum.Value<Credential, "WorkloadIdentity">
+
+/**
+ * @category models
+ */
+export type ServiceAccount = Data.TaggedEnum.Value<Credential, "ServiceAccount">
 
 /**
  * The `audience` the external OIDC token must carry: Google's default allowed audience for a
@@ -378,12 +395,11 @@ export const resolve = (
           hint: SETUP_HINT
         })
       }
-      return {
-        _tag: "OAuthRefresh",
+      return Credential.OAuthRefresh({
         clientId: oauth.clientId.value,
         clientSecret: oauth.clientSecret.value,
         refreshToken: oauth.refreshToken.value
-      } satisfies OAuthRefresh
+      })
     }
 
     const impersonate = yield* Effect.mapError(impersonateEnv, configError)
@@ -420,17 +436,15 @@ export const resolve = (
           })
         )
       )
-      const subjectToken: SubjectTokenSource = Option.match(wif.tokenFile, {
-        onNone: () => ({ _tag: "AmpOrb" }),
-        onSome: (path) => ({ _tag: "File", path })
-      })
-      return {
-        _tag: "WorkloadIdentity",
+      return Credential.WorkloadIdentity({
         provider,
         serviceAccountEmail,
         subject: yield* resolveSubject(impersonate, options.ampUserEmail),
-        subjectToken
-      } satisfies WorkloadIdentity
+        subjectToken: Option.match(wif.tokenFile, {
+          onNone: () => SubjectTokenSource.AmpOrb(),
+          onSome: (path) => SubjectTokenSource.File({ path })
+        })
+      })
     }
 
     const sa = yield* Effect.mapError(serviceAccountEnv, configError)
@@ -451,11 +465,10 @@ export const resolve = (
       )
     )
 
-    return {
-      _tag: "ServiceAccount",
+    return Credential.ServiceAccount({
       clientEmail: key.client_email,
       privateKey: Redacted.make(key.private_key),
       tokenUri: key.token_uri ?? "https://oauth2.googleapis.com/token",
       subject: yield* resolveSubject(impersonate, options.ampUserEmail)
-    } satisfies ServiceAccount
+    })
   })

@@ -89,15 +89,12 @@ export interface Shape {
  */
 export class Google extends Context.Service<Google, Shape>()("@scenesystems/google-workspace/Google") {}
 
-const decodeErrorBody = Schema.decodeUnknownOption(Model.ErrorBody)
+const decodeErrorBody = Schema.decodeUnknownOption(Schema.fromJsonString(Model.ErrorBody))
 
 const failWithApiError = (response: HttpClientResponse.HttpClientResponse): Effect.Effect<never, GoogleApiError> =>
   Effect.gen(function*() {
     const text = yield* response.text.pipe(Effect.orElseSucceed(() => ""))
-    const parsed = Option.flatMap(
-      Option.liftThrowable(() => JSON.parse(text) as unknown)(),
-      decodeErrorBody
-    )
+    const parsed = decodeErrorBody(text)
     const message = Option.flatMap(parsed, (p) => Option.fromUndefinedOr(p.error?.message)).pipe(
       Option.getOrElse(() => text.slice(0, 500) || response.request.url)
     )
@@ -132,17 +129,14 @@ export const make: Effect.Effect<Shape, never, GoogleAuth | HttpClient.HttpClien
   const send = (
     request: HttpClientRequest.HttpClientRequest
   ): Effect.Effect<HttpClientResponse.HttpClientResponse, Error> =>
-    Effect.gen(function*() {
-      let response = yield* sendOnce(request)
-      if (response.status === 401) {
-        yield* auth.invalidate
-        response = yield* sendOnce(request)
-      }
-      if (response.status < 200 || response.status >= 300) {
-        return yield* failWithApiError(response)
-      }
-      return response
-    })
+    sendOnce(request).pipe(
+      // One retry on 401: the cached token may have been revoked or expired early.
+      Effect.filterOrElse(
+        (response) => response.status !== 401,
+        () => Effect.andThen(auth.invalidate, sendOnce(request))
+      ),
+      Effect.filterOrElse((response) => response.status >= 200 && response.status < 300, failWithApiError)
+    )
 
   const json = <S extends Schema.Top & { readonly DecodingServices: never }>(schema: S) => {
     const decode = Schema.decodeUnknownEffect(schema)

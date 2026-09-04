@@ -2,7 +2,9 @@
  * The Google Workspace tool set.
  */
 import { Tool, ToolError } from "@scenesystems/amp-plugin-core"
+import * as Arr from "effect/Array"
 import * as Effect from "effect/Effect"
+import * as Match from "effect/Match"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Credential from "./Credential.ts"
@@ -77,35 +79,71 @@ const encodeRowsJson = Schema.encodeSync(Schema.fromJsonString(Model.Rows))
 
 const File = Format.FileRef()
 
-const readFileContent = (file: Model.DriveFile, format: "markdown" | "text") =>
+const TEXT_LIKE = /^text\/|json|xml|csv|markdown|yaml/i
+
+const readFirstSheetTab = (file: Model.DriveFile) =>
   Effect.gen(function*() {
     const google = yield* Google
-    switch (file.mimeType) {
-      case Model.MIME.doc:
-        return yield* google.exportFile(file.id, format === "text" ? "text/plain" : "text/markdown")
-      case Model.MIME.slides:
-        return yield* google.exportFile(file.id, "text/plain")
-      case Model.MIME.sheet: {
-        const meta = yield* google.getSpreadsheet(file.id)
-        const first = meta.sheets[0]
-        if (first === undefined) return "_(spreadsheet has no tabs)_"
-        const rows = yield* google.getValues(file.id, Format.quoteSheetTitle(first.properties.title))
-        return `_First tab "${first.properties.title}" of ${meta.sheets.length}; use gsheets_read for other tabs or ranges._\n\n${
-          Format.toMarkdownTable(rows.slice(0, 200))
-        }`
-      }
-      case Model.MIME.folder:
-        return yield* new ToolError.ToolError({
-          message: `${file.name} is a folder.`,
-          hint: `Use gdrive_search with folder=${file.id} to list its contents.`
-        })
-      default:
-        if (/^text\/|json|xml|csv|markdown|yaml/i.test(file.mimeType)) {
-          return yield* google.downloadFile(file.id)
-        }
-        return yield* new ToolError.ToolError({ message: `Cannot read ${file.mimeType} files as text (${file.name}).` })
-    }
+    const meta = yield* google.getSpreadsheet(file.id)
+    return yield* Arr.match(meta.sheets, {
+      onEmpty: () => Effect.succeed("_(spreadsheet has no tabs)_"),
+      onNonEmpty: (sheets) =>
+        google.getValues(file.id, Format.quoteSheetTitle(sheets[0].properties.title)).pipe(
+          Effect.map((rows) =>
+            `_First tab "${
+              sheets[0].properties.title
+            }" of ${sheets.length}; use gsheets_read for other tabs or ranges._\n\n${
+              Format.toMarkdownTable(rows.slice(0, 200))
+            }`
+          )
+        )
+    })
   })
+
+/**
+ * The A1 range to read: an explicit range as given, a bare tab title quoted, or (when nothing is
+ * requested) the tab the URL's `gid` named, else the first tab.
+ */
+const resolveRange = (
+  sheets: ReadonlyArray<Model.SheetTab>,
+  gid: number | undefined,
+  requested: string | undefined
+): Effect.Effect<string, ToolError.ToolError> =>
+  Option.fromUndefinedOr(requested?.trim()).pipe(
+    Option.filter((range) => range !== ""),
+    Option.match({
+      onNone: () =>
+        Arr.findFirst(sheets, (s) => s.properties.sheetId === gid).pipe(
+          Option.orElse(() => Arr.head(sheets)),
+          Option.map((tab) => Format.quoteSheetTitle(tab.properties.title)),
+          Effect.fromOption(() => new ToolError.ToolError({ message: "Spreadsheet has no tabs." }))
+        ),
+      onSome: (range) =>
+        Effect.succeed(
+          !range.includes("!") && sheets.some((s) => s.properties.title === range)
+            ? Format.quoteSheetTitle(range)
+            : range
+        )
+    })
+  )
+
+const readFileContent = (file: Model.DriveFile, format: "markdown" | "text") =>
+  Match.value(file.mimeType).pipe(
+    Match.when(Model.MIME.doc, () =>
+      Google.use((google) => google.exportFile(file.id, format === "text" ? "text/plain" : "text/markdown"))),
+    Match.when(Model.MIME.slides, () =>
+      Google.use((google) => google.exportFile(file.id, "text/plain"))),
+    Match.when(Model.MIME.sheet, () => readFirstSheetTab(file)),
+    Match.when(Model.MIME.folder, () =>
+      new ToolError.ToolError({
+        message: `${file.name} is a folder.`,
+        hint: `Use gdrive_search with folder=${file.id} to list its contents.`
+      })),
+    Match.when((mimeType) => TEXT_LIKE.test(mimeType), () => Google.use((google) => google.downloadFile(file.id))),
+    Match.orElse((mimeType) =>
+      new ToolError.ToolError({ message: `Cannot read ${mimeType} files as text (${file.name}).` })
+    )
+  )
 
 /**
  * @category tools
@@ -124,18 +162,20 @@ export const Whoami = Tool.make({
         const credential = yield* auth.credential
         const about = yield* google.about
         const readOnly = yield* auth.readOnly
-        const lines = [
-          `Credential: ${Credential.describe(credential)}`,
-          `Drive identity: ${about.user?.emailAddress ?? "unknown"}${
-            about.user?.displayName ? ` (${about.user.displayName})` : ""
-          }`,
-          `Scope: ${yield* auth.scope}${readOnly ? " (read-only mode)" : ""}`
-        ]
-        const robot = Credential.robotEmail(credential)
-        if (Option.isSome(robot)) {
-          lines.push(`Files must be shared with ${robot.value} (or live in a folder/shared drive it can access).`)
-        }
-        return lines.join("\n")
+        const scope = yield* auth.scope
+        return Arr.getSomes([
+          Option.some(`Credential: ${Credential.describe(credential)}`),
+          Option.some(
+            `Drive identity: ${about.user?.emailAddress ?? "unknown"}${
+              about.user?.displayName ? ` (${about.user.displayName})` : ""
+            }`
+          ),
+          Option.some(`Scope: ${scope}${readOnly ? " (read-only mode)" : ""}`),
+          Option.map(
+            Credential.robotEmail(credential),
+            (robot) => `Files must be shared with ${robot} (or live in a folder/shared drive it can access).`
+          )
+        ]).join("\n")
       })
     )
 })
@@ -207,12 +247,12 @@ export const FileInfo = Tool.make({
       Effect.gen(function*() {
         const google = yield* Google
         const meta = yield* google.getFile(file.id)
-        const out = [Format.formatFileHeader(meta)]
-        if (meta.mimeType === Model.MIME.sheet) {
-          const sheet = yield* google.getSpreadsheet(meta.id)
-          out.push("", "## Tabs", ...sheet.sheets.map(Format.describeTab))
-        }
-        return out.join("\n")
+        const tabs = meta.mimeType === Model.MIME.sheet
+          ? yield* google.getSpreadsheet(meta.id).pipe(
+            Effect.map((sheet) => ["", "## Tabs", ...sheet.sheets.map(Format.describeTab)])
+          )
+          : []
+        return [Format.formatFileHeader(meta), ...tabs].join("\n")
       })
     )
 })
@@ -282,17 +322,7 @@ export const ReadSheet = Tool.make({
       Effect.gen(function*() {
         const google = yield* Google
         const meta = yield* google.getSpreadsheet(input.file.id)
-        const requested = input.range?.trim()
-        let range: string
-        if (requested === undefined || requested === "") {
-          const tab = meta.sheets.find((s) => s.properties.sheetId === input.file.gid) ?? meta.sheets[0]
-          if (tab === undefined) return yield* new ToolError.ToolError({ message: "Spreadsheet has no tabs." })
-          range = Format.quoteSheetTitle(tab.properties.title)
-        } else if (!requested.includes("!") && meta.sheets.some((s) => s.properties.title === requested)) {
-          range = Format.quoteSheetTitle(requested)
-        } else {
-          range = requested
-        }
+        const range = yield* resolveRange(meta.sheets, input.file.gid, input.range)
         const rows = yield* google.getValues(input.file.id, range)
         const maxRows = Math.max(input.maxRows ?? 200, 1)
         const shown = rows.slice(0, maxRows)
@@ -397,7 +427,7 @@ export const AppendDoc = Tool.make({
         const meta = yield* google.getFile(file.id)
         if (meta.mimeType !== Model.MIME.doc) {
           return yield* new ToolError.ToolError({
-            message: `${meta.name} is a ${Format.kindOf(meta)}, not a Google Doc.`
+            message: `${meta.name} is a ${Format.kindOf(meta.mimeType)}, not a Google Doc.`
           })
         }
         yield* google.appendDocumentText(file.id, `\n${text}`)
@@ -436,4 +466,4 @@ export const AddComment = Tool.make({
  *
  * @category tools
  */
-export const all = [Whoami, Search, FileInfo, ReadDoc, ReadSheet, Comments, WriteSheet, AppendDoc, AddComment] as const
+export const all = [Whoami, Search, FileInfo, ReadDoc, ReadSheet, Comments, WriteSheet, AppendDoc, AddComment]

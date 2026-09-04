@@ -15,6 +15,7 @@ import { PluginApi } from "@scenesystems/amp-plugin-testing"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import activate, { checkCredentials, description, layer } from "../src/index.ts"
@@ -34,7 +35,7 @@ describe("plugin activation", () => {
     Effect.gen(function*() {
       const amp = PluginApi.make()
       activate(amp.api)
-      yield* Effect.addFinalizer(() => Effect.promise(() => amp.dispose()))
+      yield* Effect.addFinalizer(() => amp.dispose)
       Assert.deepStrictEqual(amp.tools.map((t) => t.name), Tools.all.map((t) => t.name))
       Assert.deepStrictEqual(
         amp.commands.map((c) => ({ id: c.id, options: c.options })),
@@ -64,10 +65,9 @@ describe("production layer", () => {
         layer.pipe(Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnvRecord(env))))
       )
       Tool.registerAll(amp.api, runtime, Tools.all)
-      yield* Effect.addFinalizer(() => Effect.promise(() => amp.dispose()))
+      yield* Effect.addFinalizer(() => amp.dispose)
       return {
-        call: (name: string, input: Record<string, unknown>) =>
-          Effect.promise(() => amp.tool(name).execute(input, amp.toolContext)),
+        call: (name: string, input: Record<string, unknown>) => amp.execute(name, input),
         checkCredentials: Effect.promise(() => runtime.runPromise(checkCredentials))
       }
     })
@@ -126,7 +126,7 @@ describe("plugin description", () => {
     const source = readFileSync(fileURLToPath(new URL("../src/index.ts", import.meta.url)), "utf8")
     const literal = /^export const description =\s*"((?:[^"\\]|\\.)*)"$/m.exec(source)?.[1]
     Assert.assertDefined(literal)
-    Assert.strictEqual(JSON.parse(`"${literal}"`), description)
+    Assert.strictEqual(Schema.decodeSync(Schema.fromJsonString(Schema.String))(`"${literal}"`), description)
     Assert.assertTrue(description.length <= 300, `description is ${description.length} characters`)
   })
 })

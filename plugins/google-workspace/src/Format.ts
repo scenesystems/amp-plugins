@@ -1,25 +1,30 @@
 /**
  * Pure helpers: file reference parsing, Drive query building, and Markdown rendering.
  */
+import * as Arr from "effect/Array"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import * as Record from "effect/Record"
 import * as Schema from "effect/Schema"
 import * as Getter from "effect/SchemaGetter"
 import * as Issue from "effect/SchemaIssue"
 import type { CellValue, DriveComment, DriveFile, Rows, SheetTab } from "./Model.ts"
 import { MIME } from "./Model.ts"
 
+const FileRefStruct = Schema.Struct({
+  id: Schema.String,
+  gid: Schema.optionalKey(Schema.Finite)
+})
+
 /**
  * A resolved Drive file reference: the file ID plus the sheet tab `gid` when the URL carried one.
  *
  * @category models
  */
-export interface FileRef {
-  readonly id: string
-  readonly gid?: number
-}
+export type FileRef = typeof FileRefStruct.Type
 
-const fileRef = (id: string, gid: number | undefined): FileRef => gid === undefined ? { id } : { id, gid }
+const fileRef = (id: string, gid: Option.Option<number>): FileRef =>
+  Option.match(gid, { onNone: () => ({ id }), onSome: (gid) => ({ id, gid }) })
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{10,}$/
 const PATH_PATTERNS = [
@@ -40,26 +45,23 @@ export const parseFileRef = (input: string): Option.Option<FileRef> => {
   if (!/^https?:\/\//i.test(raw)) {
     return ID_PATTERN.test(raw) ? Option.some({ id: raw }) : Option.none()
   }
-  let url: URL
-  try {
-    url = new URL(raw)
-  } catch {
-    return Option.none()
-  }
-  const gidMatch = /gid=(\d+)/.exec(url.hash) ?? /gid=(\d+)/.exec(url.search)
-  const gid = gidMatch ? Number(gidMatch[1]) : undefined
-  for (const pattern of PATH_PATTERNS) {
-    const match = pattern.exec(url.pathname)
-    if (match) return Option.some(fileRef(match[1]!, gid))
-  }
-  const idParam = url.searchParams.get("id")
-  return idParam ? Option.some(fileRef(idParam, gid)) : Option.none()
+  return parseUrl(raw).pipe(
+    Option.flatMap((url) => {
+      const gid = Option.orElse(firstGroup(/gid=(\d+)/, url.hash), () => firstGroup(/gid=(\d+)/, url.search)).pipe(
+        Option.map(Number)
+      )
+      const fromPath = Arr.findFirst(PATH_PATTERNS, (pattern) => firstGroup(pattern, url.pathname))
+      const fromQuery = Option.fromNullishOr(url.searchParams.get("id")).pipe(Option.filter((id) => id !== ""))
+      return Option.map(Option.orElse(fromPath, () => fromQuery), (id) => fileRef(id, gid))
+    })
+  )
 }
 
-const FileRefStruct = Schema.Struct({
-  id: Schema.String,
-  gid: Schema.optionalKey(Schema.Finite)
-})
+const parseUrl = Option.liftThrowable((raw: string) => new URL(raw))
+
+/** The first capture group of `pattern` in `subject`, when it matches. */
+const firstGroup = (pattern: RegExp, subject: string): Option.Option<string> =>
+  Option.fromNullishOr(pattern.exec(subject)).pipe(Option.flatMap((match) => Option.fromUndefinedOr(match[1])))
 
 /**
  * Tool-input schema for a file: encoded as a string (ID or URL), decoded to a `FileRef`.
@@ -100,23 +102,25 @@ export const driveQuery = (parts: {
   readonly mimeTypes?: ReadonlyArray<string> | undefined
   readonly folderId?: string | undefined
   readonly trashed?: boolean | undefined
-}): string => {
-  const clauses = [`trashed = ${parts.trashed ? "true" : "false"}`]
-  const text = parts.text?.trim()
-  if (text) {
-    const literal = queryLiteral(text)
-    clauses.push(
-      parts.nameOnly ? `name contains ${literal}` : `(name contains ${literal} or fullText contains ${literal})`
-    )
-  }
-  if (parts.mimeTypes && parts.mimeTypes.length > 0) {
-    clauses.push(`(${parts.mimeTypes.map((m) => `mimeType = ${queryLiteral(m)}`).join(" or ")})`)
-  }
-  if (parts.folderId) {
-    clauses.push(`${queryLiteral(parts.folderId)} in parents`)
-  }
-  return clauses.join(" and ")
-}
+}): string =>
+  Arr.getSomes([
+    Option.some(`trashed = ${parts.trashed ? "true" : "false"}`),
+    nonEmpty(parts.text?.trim()).pipe(
+      Option.map(queryLiteral),
+      Option.map((literal) =>
+        parts.nameOnly ? `name contains ${literal}` : `(name contains ${literal} or fullText contains ${literal})`
+      )
+    ),
+    Option.fromUndefinedOr(parts.mimeTypes).pipe(
+      Option.filter(Arr.isReadonlyArrayNonEmpty),
+      Option.map((mimeTypes) => `(${mimeTypes.map((m) => `mimeType = ${queryLiteral(m)}`).join(" or ")})`)
+    ),
+    Option.map(nonEmpty(parts.folderId), (folderId) => `${queryLiteral(folderId)} in parents`)
+  ]).join(" and ")
+
+/** `Some` for a present, non-empty string. */
+const nonEmpty = (value: string | undefined): Option.Option<string> =>
+  Option.fromUndefinedOr(value).pipe(Option.filter((text) => text !== ""))
 
 /** A single-quoted Drive query literal; backslashes and quotes are backslash-escaped. */
 const queryLiteral = (value: string): string => `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`
@@ -126,19 +130,13 @@ const queryLiteral = (value: string): string => `'${value.replace(/\\/g, "\\\\")
  *
  * @category rendering
  */
-export const kindOf = (file: Pick<DriveFile, "mimeType">): string => {
-  switch (file.mimeType) {
-    case MIME.doc:
-      return "Google Doc"
-    case MIME.sheet:
-      return "Google Sheet"
-    case MIME.slides:
-      return "Google Slides"
-    case MIME.folder:
-      return "Folder"
-    default:
-      return file.mimeType
-  }
+export const kindOf = (mimeType: string): string => Option.getOrElse(Record.get(KIND_NAMES, mimeType), () => mimeType)
+
+const KIND_NAMES: Record<string, string> = {
+  [MIME.doc]: "Google Doc",
+  [MIME.sheet]: "Google Sheet",
+  [MIME.slides]: "Google Slides",
+  [MIME.folder]: "Folder"
 }
 
 /**
@@ -148,12 +146,12 @@ export const kindOf = (file: Pick<DriveFile, "mimeType">): string => {
  */
 export const formatFileLine = (file: DriveFile): string => {
   const owner = file.owners?.[0]?.emailAddress ?? file.lastModifyingUser?.emailAddress
-  return [
-    `- **${file.name}** (${kindOf(file)})`,
-    `  id: ${file.id}`,
-    file.modifiedTime ? `  modified: ${file.modifiedTime}${owner ? ` by ${owner}` : ""}` : undefined,
-    file.webViewLink ? `  link: ${file.webViewLink}` : undefined
-  ].filter((line) => line !== undefined).join("\n")
+  return Arr.getSomes([
+    Option.some(`- **${file.name}** (${kindOf(file.mimeType)})`),
+    Option.some(`  id: ${file.id}`),
+    Option.map(nonEmpty(file.modifiedTime), (modified) => `  modified: ${modified}${owner ? ` by ${owner}` : ""}`),
+    Option.map(nonEmpty(file.webViewLink), (link) => `  link: ${link}`)
+  ]).join("\n")
 }
 
 /**
@@ -162,17 +160,19 @@ export const formatFileLine = (file: DriveFile): string => {
  * @category rendering
  */
 export const formatFileHeader = (file: DriveFile): string => {
-  const lines = [`# ${file.name}`, `- Type: ${kindOf(file)}`, `- ID: ${file.id}`]
-  if (file.webViewLink) lines.push(`- Link: ${file.webViewLink}`)
-  if (file.modifiedTime) {
-    const who = file.lastModifyingUser?.emailAddress ?? file.lastModifyingUser?.displayName
-    lines.push(`- Modified: ${file.modifiedTime}${who ? ` by ${who}` : ""}`)
-  }
-  if (file.owners && file.owners.length > 0) {
-    lines.push(`- Owner: ${file.owners.map((o) => o.emailAddress ?? o.displayName).join(", ")}`)
-  }
-  if (file.description) lines.push(`- Description: ${file.description}`)
-  return lines.join("\n")
+  const who = file.lastModifyingUser?.emailAddress ?? file.lastModifyingUser?.displayName
+  return Arr.getSomes([
+    Option.some(`# ${file.name}`),
+    Option.some(`- Type: ${kindOf(file.mimeType)}`),
+    Option.some(`- ID: ${file.id}`),
+    Option.map(nonEmpty(file.webViewLink), (link) => `- Link: ${link}`),
+    Option.map(nonEmpty(file.modifiedTime), (modified) => `- Modified: ${modified}${who ? ` by ${who}` : ""}`),
+    Option.fromUndefinedOr(file.owners).pipe(
+      Option.filter(Arr.isReadonlyArrayNonEmpty),
+      Option.map((owners) => `- Owner: ${owners.map((o) => o.emailAddress ?? o.displayName).join(", ")}`)
+    ),
+    Option.map(nonEmpty(file.description), (description) => `- Description: ${description}`)
+  ]).join("\n")
 }
 
 /**
@@ -194,13 +194,9 @@ const cellText = (value: CellValue | undefined): string => value === null || val
  * @category rendering
  */
 export const columnLetter = (index: number): string => {
-  let n = index
-  let out = ""
-  do {
-    out = String.fromCharCode(65 + (n % 26)) + out
-    n = Math.floor(n / 26) - 1
-  } while (n >= 0)
-  return out
+  const letter = String.fromCharCode(65 + (index % 26))
+  const rest = Math.floor(index / 26) - 1
+  return rest >= 0 ? columnLetter(rest) + letter : letter
 }
 
 /**
@@ -208,20 +204,23 @@ export const columnLetter = (index: number): string => {
  *
  * @category rendering
  */
-export const toMarkdownTable = (rows: Rows, options: { readonly headerRow?: boolean | undefined } = {}): string => {
-  if (rows.length === 0) return "_(empty range)_"
-  const width = Math.max(...rows.map((r) => r.length), 1)
-  const escape = (s: string) => s.replace(/\|/g, "\\|").replace(/\r?\n/g, " ")
-  const pad = (row: ReadonlyArray<CellValue>) => Array.from({ length: width }, (_, i) => escape(cellText(row[i])))
-  const useHeader = options.headerRow !== false
-  const header = useHeader ? pad(rows[0]!) : Array.from({ length: width }, (_, i) => columnLetter(i))
-  const body = useHeader ? rows.slice(1) : rows
-  return [
-    `| ${header.join(" | ")} |`,
-    `| ${header.map(() => "---").join(" | ")} |`,
-    ...body.map((row) => `| ${pad(row).join(" | ")} |`)
-  ].join("\n")
-}
+export const toMarkdownTable = (rows: Rows, options: { readonly headerRow?: boolean | undefined } = {}): string =>
+  Arr.match(rows, {
+    onEmpty: () => "_(empty range)_",
+    onNonEmpty: (rows) => {
+      const width = Math.max(...rows.map((r) => r.length), 1)
+      const escape = (s: string) => s.replace(/\|/g, "\\|").replace(/\r?\n/g, " ")
+      const pad = (row: ReadonlyArray<CellValue>) => Arr.makeBy(width, (i) => escape(cellText(row[i])))
+      const useHeader = options.headerRow !== false
+      const header = useHeader ? pad(rows[0]) : Arr.makeBy(width, columnLetter)
+      const body = useHeader ? rows.slice(1) : rows
+      return [
+        `| ${header.join(" | ")} |`,
+        `| ${header.map(() => "---").join(" | ")} |`,
+        ...body.map((row) => `| ${pad(row).join(" | ")} |`)
+      ].join("\n")
+    }
+  })
 
 /**
  * Renders rows as RFC 4180 CSV.
@@ -246,27 +245,30 @@ export const quoteSheetTitle = (title: string): string =>
  *
  * @category rendering
  */
-export const formatComments = (comments: ReadonlyArray<DriveComment>): string => {
-  if (comments.length === 0) return "_(no comments)_"
-  return comments
-    .map((c) => {
-      const who = c.author?.displayName ?? c.author?.emailAddress ?? "unknown"
-      const status = c.resolved ? " [resolved]" : ""
-      const lines = [`### ${who} — ${c.createdTime ?? ""}${status}`]
-      if (c.quotedFileContent?.value) {
-        lines.push(`> ${c.quotedFileContent.value.replace(/\r?\n/g, "\n> ")}`)
-      }
-      lines.push(c.content ?? "")
-      for (const reply of c.replies ?? []) {
-        const replyWho = reply.author?.displayName ?? reply.author?.emailAddress ?? "unknown"
-        const action = reply.action ? ` (${reply.action})` : ""
-        lines.push(`  - **${replyWho}**${action} ${reply.createdTime ?? ""}: ${reply.content ?? ""}`)
-      }
-      lines.push(`  _comment id: ${c.id}_`)
-      return lines.join("\n")
-    })
-    .join("\n\n")
-}
+export const formatComments = (comments: ReadonlyArray<DriveComment>): string =>
+  Arr.match(comments, {
+    onEmpty: () => "_(no comments)_",
+    onNonEmpty: (comments) =>
+      comments
+        .map((c) => {
+          const who = c.author?.displayName ?? c.author?.emailAddress ?? "unknown"
+          const status = c.resolved ? " [resolved]" : ""
+          return [
+            `### ${who} — ${c.createdTime ?? ""}${status}`,
+            ...Arr.fromOption(
+              Option.map(nonEmpty(c.quotedFileContent?.value), (quoted) => `> ${quoted.replace(/\r?\n/g, "\n> ")}`)
+            ),
+            c.content ?? "",
+            ...(c.replies ?? []).map((reply) => {
+              const replyWho = reply.author?.displayName ?? reply.author?.emailAddress ?? "unknown"
+              const action = reply.action ? ` (${reply.action})` : ""
+              return `  - **${replyWho}**${action} ${reply.createdTime ?? ""}: ${reply.content ?? ""}`
+            }),
+            `  _comment id: ${c.id}_`
+          ].join("\n")
+        })
+        .join("\n\n")
+  })
 
 /**
  * A page of a long text.

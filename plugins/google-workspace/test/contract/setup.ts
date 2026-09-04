@@ -24,20 +24,26 @@ const credentialKinds: ReadonlyArray<{ readonly name: string; readonly all: Read
   { name: "service account key file", all: ["GOOGLE_APPLICATION_CREDENTIALS"] }
 ]
 
-const problems: Array<string> = []
-if (!credentialKinds.some((kind) => kind.all.every(isSet))) {
-  problems.push(
-    "a complete Google credential: " +
-      credentialKinds.map((kind) => `${kind.name} (${kind.all.join(" + ")})`).join(", ")
-  )
-}
-if (!isSet("GOOGLE_WORKSPACE_CONTRACT_FOLDER")) {
-  problems.push("GOOGLE_WORKSPACE_CONTRACT_FOLDER (a Drive folder ID shared with that identity as Editor)")
-}
+import * as Arr from "effect/Array"
+import * as Schema from "effect/Schema"
+
+class ContractSetupError extends Schema.TaggedError<ContractSetupError>()("ContractSetupError", {
+  message: Schema.String
+}) {}
+
+const problems = Arr.filter([
+  credentialKinds.some((kind) => kind.all.every(isSet))
+    ? undefined
+    : "a complete Google credential: " +
+      credentialKinds.map((kind) => `${kind.name} (${kind.all.join(" + ")})`).join(", "),
+  isSet("GOOGLE_WORKSPACE_CONTRACT_FOLDER")
+    ? undefined
+    : "GOOGLE_WORKSPACE_CONTRACT_FOLDER (a Drive folder ID shared with that identity as Editor)"
+], (problem): problem is string => problem !== undefined)
 
 if (problems.length > 0) {
-  throw new Error(
-    `Contract tests need ${problems.join(" and ")}. ` +
+  throw new ContractSetupError({
+    message: `Contract tests need ${problems.join(" and ")}. ` +
       "See plugins/google-workspace/skills/google-workspace/reference/setup.md, or run `bun run test` for the hermetic unit suite."
-  )
+  })
 }

@@ -10,12 +10,14 @@ import { describe, it } from "@effect/vitest"
 import * as Assert from "@effect/vitest/utils"
 import { Runtime, Tool } from "@scenesystems/amp-plugin-core"
 import { PluginApi } from "@scenesystems/amp-plugin-testing"
+import * as Arr from "effect/Array"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
-import { expect } from "vitest"
-import { GoogleApiError, type Shape } from "../src/Google.ts"
+import { GoogleApiError } from "../src/Google.ts"
 import * as Model from "../src/Model.ts"
 import * as Tools from "../src/Tools.ts"
 import * as Services from "./support/services.ts"
@@ -75,27 +77,34 @@ const ENABLE_APIS_HINT =
   "Enable the Google Drive API, Google Docs API, and Google Sheets API in the Google Cloud project that owns these credentials."
 const READ_ONLY_REFUSAL =
   "Error: Write tools are disabled because GOOGLE_WORKSPACE_READ_ONLY is set.\nHint: Unset it (and run `amp orb restart-processes` in an orb) to enable writes."
+const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
+
+class Boom extends Schema.TaggedError<Boom>()("Boom", { message: Schema.String }) {}
 
 // --- harness -----------------------------------------------------------------------------------
 
 interface Harness {
-  /** Calls a registered tool with raw (undecoded) input, as Amp does. */
-  readonly call: (name: string, input: Record<string, unknown>) => Effect.Effect<string>
+  /** Calls a registered tool with raw (undecoded) input, as Amp does, and reads its text result. */
+  readonly call: (
+    name: string,
+    input: Record<string, unknown>
+  ) => Effect.Effect<string, PluginApi.UnknownRegistration | PluginApi.NotText>
   readonly calls: ReadonlyArray<Services.Call>
   readonly amp: PluginApi.Fake
 }
 
-const harness = (options: { readonly google?: Partial<Shape>; readonly auth?: Services.AuthOptions } = {}) =>
+const harness = (options: { readonly google?: Services.Stubs; readonly auth?: Services.AuthOptions } = {}) =>
   Effect.gen(function*() {
     const amp = PluginApi.make()
     const google = Services.google(options.google ?? {})
     const runtime = Runtime.make(amp.api, Layer.mergeAll(google.layer, Services.auth(options.auth)))
     Tool.registerAll(amp.api, runtime, Tools.all)
-    yield* Effect.addFinalizer(() => Effect.promise(() => amp.dispose()))
+    yield* Effect.addFinalizer(() => amp.dispose)
     const result: Harness = {
-      call: (name, input) =>
-        Effect.map(Effect.promise(() => amp.tool(name).execute(input, amp.toolContext)), PluginApi.text),
-      calls: google.calls,
+      call: (name, input) => Effect.flatMap(amp.execute(name, input), PluginApi.text),
+      get calls() {
+        return google.calls
+      },
       amp
     }
     return result
@@ -268,9 +277,12 @@ describe("gdrive_search", () => {
         yield* h.call("gdrive_search", { type: "folders" }),
         `1 result(s):\n- **Specs** (Folder)\n  id: ${folder.id}`
       )
-      Assert.deepStrictEqual(h.calls[0]!.args, [{
-        q: "trashed = false and (mimeType = 'application/vnd.google-apps.folder')",
-        pageSize: undefined
+      Assert.deepStrictEqual(h.calls, [{
+        method: "listFiles",
+        args: [{
+          q: "trashed = false and (mimeType = 'application/vnd.google-apps.folder')",
+          pageSize: undefined
+        }]
       }])
     }))
 
@@ -432,10 +444,10 @@ describe("Google API errors are explained to the agent", () => {
 
   it.effect("a defect is reported with its cause instead of rejecting the tool call", () =>
     Effect.gen(function*() {
-      const h = yield* harness({ google: { getFile: () => Effect.die(new Error("kaboom")) } })
+      const h = yield* harness({ google: { getFile: () => Effect.die(new Boom({ message: "kaboom" })) } })
       const out = yield* h.call("gdrive_file_info", { file: DOC_ID })
       Assert.assertTrue(
-        out.startsWith("Tool failed unexpectedly:\nError: kaboom\n    at "),
+        out.startsWith("Tool failed unexpectedly:\nBoom: kaboom\n    at "),
         `unexpected rendering:\n${out}`
       )
     }))
@@ -504,7 +516,7 @@ describe("gdocs_read", () => {
         properties: { title: "Roadmap" },
         sheets: [{ properties: { sheetId: 0, title: "Q4 Plan" } }]
       })
-      const many: Model.Rows = Array.from({ length: 250 }, (_, i) => [i])
+      const many: Model.Rows = Arr.makeBy(250, (i) => [i])
       const h = yield* harness({
         google: {
           getFile: () => Effect.succeed(sheet),
@@ -515,9 +527,12 @@ describe("gdocs_read", () => {
       const out = yield* h.call("gdocs_read", { file: SHEET_ID })
       Assert.deepStrictEqual(h.calls[2], { method: "getValues", args: [SHEET_ID, "'Q4 Plan'"] })
       // header row "0", separator, then rows 1..199: 201 table lines after the note.
-      const table = out.split("\n\n---\n\n")[1]!.split("\n\n")[1]!
-      Assert.strictEqual(table.split("\n").length, 201)
-      Assert.strictEqual(table.split("\n").at(-1), "| 199 |")
+      const content = Arr.get(out.split("\n\n---\n\n"), 1)
+      Assert.assertTrue(Option.isSome(content))
+      const table = Arr.get(content.value.split("\n\n"), 1)
+      Assert.assertTrue(Option.isSome(table))
+      Assert.strictEqual(table.value.split("\n").length, 201)
+      Assert.strictEqual(table.value.split("\n").at(-1), "| 199 |")
     }))
 
   it.effect("a Sheet with no tabs says so", () =>
@@ -591,7 +606,7 @@ describe("gdocs_read", () => {
 // --- gsheets_read ---------------------------------------------------------------------------------
 
 describe("gsheets_read", () => {
-  const google = (values: Model.Rows = rows): Partial<Shape> => ({
+  const google = (values: Model.Rows = rows): Services.Stubs => ({
     getSpreadsheet: () => Effect.succeed(spreadsheet),
     getValues: () => Effect.succeed(values)
   })
@@ -931,24 +946,30 @@ describe("tool definitions", () => {
   })
 
   it("the skill's builtin-tools list is exactly the registered tool names, in order", () => {
-    const frontmatter = skill.split("---")[1]!
-    const listed = frontmatter.split("builtin-tools:")[1]!.split("\n").filter((line) => line.startsWith("  - "))
+    const frontmatter = Arr.get(skill.split("---"), 1)
+    Assert.assertTrue(Option.isSome(frontmatter))
+    const toolsSection = Arr.get(frontmatter.value.split("builtin-tools:"), 1)
+    Assert.assertTrue(Option.isSome(toolsSection))
+    const listed = toolsSection.value.split("\n").filter((line) => line.startsWith("  - "))
       .map((line) => line.slice(4).trim())
     Assert.deepStrictEqual(listed, Tools.all.map((t) => t.name))
   })
 
   it("every tool name is mentioned in the skill body", () => {
     const body = skill.split("---").slice(2).join("---")
-    for (const tool of Tools.all) Assert.assertInclude(body, `\`${tool.name}\``)
+    Arr.forEach(Tools.all, (tool) => Assert.assertInclude(body, `\`${tool.name}\``))
   })
 
-  it("names, descriptions, and input schemas match the committed contract", async () => {
+  it("names, descriptions, and input schemas match the committed contract", () => {
     // What the model sees. Changing it changes agent behaviour, so the diff must be reviewed deliberately.
     const contract = Tools.all.map((tool) => ({
       name: tool.name,
       description: tool.description,
       inputSchema: Tool.toInputSchema(tool.input)
     }))
-    await expect(`${JSON.stringify(contract, null, 2)}\n`).toMatchFileSnapshot("__snapshots__/tool-contract.json")
+    const committed = Schema.decodeSync(Schema.fromJsonString(Schema.Unknown))(
+      readFileSync(fileURLToPath(new URL("__snapshots__/tool-contract.json", import.meta.url)), "utf8")
+    )
+    Assert.strictEqual(toJson(contract), toJson(committed))
   })
 })

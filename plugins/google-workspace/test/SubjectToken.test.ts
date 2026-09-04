@@ -7,16 +7,18 @@ import { Assert as ExitAssert } from "@scenesystems/amp-plugin-testing"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
+import * as Schema from "effect/Schema"
 import * as TestSchema from "effect/testing/TestSchema"
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { CredentialError } from "../src/Credential.ts"
+import { CredentialError, type SubjectTokenSource } from "../src/Credential.ts"
 import { CompactJwt, layer as SubjectTokenLayer, ORB_ONLY_HINT, SubjectToken } from "../src/SubjectToken.ts"
 
 const AUDIENCE =
   "https://iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/amp-orbs/providers/amp"
 const JWT = "eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJhbXAifQ.c2ln"
+const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Struct({ access_token: Schema.String })))
 
 /** The real spawner and file system: these tests run `amp` for real, so the fake has to be a program. */
 const live = SubjectTokenLayer.pipe(
@@ -24,7 +26,7 @@ const live = SubjectTokenLayer.pipe(
   Layer.provide([BunFileSystem.layer, BunPath.layer])
 )
 
-const get = (source: Parameters<SubjectToken["Service"]["get"]>[0], audience = AUDIENCE) =>
+const get = (source: SubjectTokenSource, audience = AUDIENCE) =>
   SubjectToken.use((s) => s.get(source, audience)).pipe(Effect.provide(live), Effect.exit)
 
 /**
@@ -174,7 +176,7 @@ describe("SubjectToken: File source", () => {
   it.live("rejects a file that does not hold a JWT", () =>
     Effect.gen(function*() {
       const path = join(yield* tempDir, "token")
-      yield* Effect.promise(() => writeFile(path, JSON.stringify({ access_token: "ya29.not-a-jwt" })))
+      yield* Effect.promise(() => writeFile(path, toJson({ access_token: "ya29.not-a-jwt" })))
       ExitAssert.assertFails(
         yield* get({ _tag: "File", path }),
         new CredentialError({
@@ -187,19 +189,21 @@ describe("SubjectToken: File source", () => {
 describe("SubjectToken.CompactJwt schema", () => {
   const asserts = new TestSchema.Asserts(CompactJwt)
 
-  it("accepts three non-empty base64url segments", async () => {
-    await asserts.decoding().succeed(JWT, JWT)
-    await asserts.decoding().succeed("a.b.c", "a.b.c")
-    await asserts.decoding().succeed("A-_9.B-_8.C-_7", "A-_9.B-_8.C-_7")
-  })
+  it.effect("accepts three non-empty base64url segments", () =>
+    Effect.gen(function*() {
+      yield* Effect.promise(() => asserts.decoding().succeed(JWT, JWT))
+      yield* Effect.promise(() => asserts.decoding().succeed("a.b.c", "a.b.c"))
+      yield* Effect.promise(() => asserts.decoding().succeed("A-_9.B-_8.C-_7", "A-_9.B-_8.C-_7"))
+    }))
 
-  it("rejects padding, missing segments, and characters outside base64url", async () => {
-    const expected = "Expected a string matching the RegExp ^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$"
-    await asserts.decoding().fail("a.b", expected)
-    await asserts.decoding().fail("a.b.c.d", expected)
-    await asserts.decoding().fail("a.b.", expected)
-    await asserts.decoding().fail("a=.b.c", expected)
-    await asserts.decoding().fail("a+b.c.d", expected)
-    await asserts.decoding().fail("", expected)
-  })
+  it.effect("rejects padding, missing segments, and characters outside base64url", () =>
+    Effect.gen(function*() {
+      const expected = "Expected a string matching the RegExp ^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$"
+      yield* Effect.promise(() => asserts.decoding().fail("a.b", expected))
+      yield* Effect.promise(() => asserts.decoding().fail("a.b.c.d", expected))
+      yield* Effect.promise(() => asserts.decoding().fail("a.b.", expected))
+      yield* Effect.promise(() => asserts.decoding().fail("a=.b.c", expected))
+      yield* Effect.promise(() => asserts.decoding().fail("a+b.c.d", expected))
+      yield* Effect.promise(() => asserts.decoding().fail("", expected))
+    }))
 })

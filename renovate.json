@@ -12,7 +12,7 @@
   "packageRules": [
     {
       "description": "TypeScript, oxlint, and oxlint-tsgolint must match @effect/tsgo's support table; `effect-tsgo patch` fails `bun install` otherwise, so bump them as one PR and let CI decide.",
-      "matchPackageNames": ["@effect/tsgo", "typescript", "oxlint", "oxlint-tsgolint"],
+      "matchPackageNames": ["@effect/tsgo", "typescript", "oxlint", "oxlint-tsgolint", "@oxlint/plugins"],
       "groupName": "effect-tsgo toolchain",
       "rangeStrategy": "pin",
       "schedule": ["at any time"]

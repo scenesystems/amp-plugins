@@ -4,6 +4,8 @@
   // `bun install` runs `effect-tsgo patch --oxlint` (see package.json "prepare") to wire them in.
   "extends": ["./node_modules/@effect/tsgo/oxlint-presets/recommended.json"],
   "plugins": ["typescript", "import", "oxc", "eslint", "unicorn", "node", "effecttsgo"],
+  // Syntactic Effect discipline (casts, loops, let, switch, throw, Map, Object.*, ...): see lint/effect-native.ts.
+  "jsPlugins": ["./lint/effect-native.ts"],
   "categories": {
     "correctness": "error",
     "suspicious": "error",
@@ -11,6 +13,26 @@
   },
   "ignorePatterns": ["**/dist", "**/coverage", "**/node_modules", ".amp/**", ".agents/**"],
   "rules": {
+    // Plain JS/TS that should be Effect (lint/effect-native.ts).
+    "effect-native/type-assertions": "error",
+    "effect-native/no-let": "error",
+    "effect-native/imperative-loops": "error",
+    "effect-native/switch-statement": "error",
+    "effect-native/collections": "error",
+    "effect-native/object-builtins": "error",
+    "effect-native/array-builtins": "error",
+    "effect-native/json-builtins": "error",
+    "effect-native/no-throw-try": "error",
+    "effect-native/no-new-error": "error",
+    "effect-native/no-async": "error",
+    "effect-native/promise-chaining": "error",
+    "effect-native/utility-types": "error",
+    "effect-native/tacit-usage": "error",
+    "effect-native/entry-point": "error",
+    "effect-native/error-swallowing": "error",
+    "effect-native/no-log-interpolation": "error",
+    "effect-native/abort-controller": "error",
+    "effect-native/error-type-annotation": "error",
     // Effect diagnostics that should fail CI rather than warn.
     "effecttsgo/floating-effect": "error",
     "effecttsgo/missing-effect-context": "error",
@@ -54,11 +76,11 @@
     "unicorn/no-array-sort": "off",
     "unicorn/no-array-reverse": "off",
     "unicorn/prefer-set-has": "off",
-    "typescript/no-explicit-any": "off",
+    "typescript/no-explicit-any": "error",
     "typescript/no-empty-interface": "off",
     "typescript/ban-ts-comment": "off",
     "typescript/no-namespace": "off",
-    "typescript/no-non-null-assertion": "off",
+    "typescript/no-non-null-assertion": "error",
     "typescript/no-dynamic-delete": "off",
     "typescript/no-invalid-void-type": "off",
     "typescript/no-unsafe-function-type": "off",
@@ -70,39 +92,45 @@
   },
   "overrides": [
     {
-      // Build scripts and tests run outside Amp: console and process.env are fine there.
-      "files": ["**/scripts/**", "**/test/**", "**/*.test.ts"],
+      // Build scripts and tests run outside Amp: console, process.env, and node: imports are fine there.
+      "files": ["**/scripts/**", "**/test/**", "**/*.test.ts", "packages/testing/src/**"],
       "rules": {
         "eslint/no-console": "off",
         "effecttsgo/global-console": "off",
         "effecttsgo/global-console-in-effect": "off",
         "effecttsgo/process-env": "off",
         "effecttsgo/process-env-in-effect": "off",
-        "effecttsgo/async-function": "off",
-        "effecttsgo/node-builtin-import": "off",
-        "effecttsgo/new-promise": "off",
-        "effecttsgo/global-fetch": "off",
-        "effecttsgo/global-date": "off"
+        "effecttsgo/node-builtin-import": "off"
       }
     },
     {
-      // Tests stub Amp APIs with partial objects, each test is its own entry point that provides layers, fixtures are
-      // built as raw JSON on purpose, and untagged errors are injected to prove they are rendered as defects.
-      "files": ["**/test/**", "**/*.test.ts"],
+      // Tests and the shared test support are entry points: each test provides its own layers, an assertion fails by
+      // throwing, and untagged errors are injected on purpose to prove they are rendered as defects.
+      "files": ["**/test/**", "**/*.test.ts", "packages/testing/src/**"],
       "rules": {
-        "typescript/no-unsafe-type-assertion": "off",
+        "effect-native/no-throw-try": "off",
+        "effect-native/entry-point": "off",
+        "effect-native/no-log-interpolation": "off",
         "effecttsgo/strict-effect-provide": "off",
-        "effecttsgo/prefer-schema-over-json": "off",
         "effecttsgo/global-error-in-effect-failure": "off"
       }
     },
     {
-      // Test fixtures: the fake PluginAPI is a Proxy over a partial object that must be typed as the full interface,
-      // and its disposer mirrors Amp's Promise-based API.
-      "files": ["packages/testing/src/**"],
+      // The lint plugin itself is oxlint tooling, not Effect code: it speaks ESTree and the oxlint plugin API.
+      "files": ["lint/**"],
       "rules": {
-        "typescript/no-unsafe-type-assertion": "off",
-        "effecttsgo/async-function": "off"
+        "effect-native/type-assertions": "off",
+        "effect-native/no-let": "off",
+        "effect-native/imperative-loops": "off",
+        "effect-native/switch-statement": "off",
+        "effect-native/collections": "off",
+        "effect-native/object-builtins": "off",
+        "effect-native/array-builtins": "off",
+        "effect-native/json-builtins": "off",
+        "effect-native/no-throw-try": "off",
+        "effect-native/no-new-error": "off",
+        "effect-native/utility-types": "off",
+        "effect-native/error-swallowing": "off"
       }
     }
   ]

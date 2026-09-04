@@ -154,6 +154,14 @@ Mirrors the [Effect repository](https://github.com/Effect-TS/effect-smol): TypeS
 compiler) with [`@effect/tsgo`](https://github.com/Effect-TS/tsgo) providing the Effect language service, `oxlint` with
 the Effect type-aware rule preset, and `dprint` for formatting.
 
+Lint has two halves. `effecttsgo/*` (from `oxlint-tsgolint`) is type-aware and knows Effect: unhandled errors, missing
+layers, `Option.match` that should be `Effect.fromOption`. `effect-native/*` is this repository's own syntactic plugin
+in `lint/effect-native.ts` (an [oxlint JS plugin](https://oxc.rs/docs/guide/usage/linter/js-plugins) built on
+`@oxlint/plugins`): it bans the plain-JavaScript constructs that have an Effect replacement (`as`, `let`, loops,
+`switch`, `JSON.*`, `Object.*`, `new Error`, `async`/`await`, `Effect.run*` outside an entry file) and every message
+names the replacement. Tests and scripts relax only the rules that a test or a program entry point needs (`throw`,
+`Effect.run*`, `console`); see `.oxlintrc.json`.
+
 Editor setup: install the recommended VS Code extensions in `.vscode/extensions.json` (TypeScript Native Preview,
 Effect, dprint, oxc).
 
@@ -163,13 +171,13 @@ Effect, dprint, oxc).
 we intend to accept. Upgrades arrive as CI-checked pull requests from [Renovate](https://docs.renovatebot.com/) using
 `renovate.json` (enable the Mend Renovate GitHub App on the repository), never as silent floats.
 
-| Dependency                                                | Range | Why                                                                                                                                                                                                                            |
-| --------------------------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `typescript`, `oxlint`, `oxlint-tsgolint`, `@effect/tsgo` | exact | `effect-tsgo patch` runs on `bun install` and fails if the versions are not on `@effect/tsgo`'s support table, so they are bumped together in one grouped PR that CI either accepts or rejects.                                |
-| `@ampcode/plugin`                                         | exact | Published daily as `0.0.0-<date>-<sha>` under the `latest` dist-tag. A semver range resolves to the stale `0.0.0-dev` stub (alphanumeric prerelease identifiers sort above numeric ones), so Renovate follows the tag instead. |
-| `effect`                                                  | `^`   | `^4.0.0-rc.N` accepts later release candidates, `4.0.0`, and `4.x`. Release candidates have renamed APIs, so each bump is a PR; Renovate's `rangeStrategy: bump` keeps the range's lower bound at the version actually tested. |
-| `@effect/platform-bun`, `@effect/vitest`                  | exact | Released in lockstep with `effect` (same rc number) and grouped with it, so the three move in one PR.                                                                                                                          |
-| `vitest`, `@types/bun`, `@types/node`, `dprint`           | `^`   | Not coupled to anything. `@types/node` stays on the major in `.node-version`; Node majors are bumped by hand (see Testing).                                                                                                    |
+| Dependency                                                                   | Range | Why                                                                                                                                                                                                                            |
+| ---------------------------------------------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `typescript`, `oxlint`, `oxlint-tsgolint`, `@oxlint/plugins`, `@effect/tsgo` | exact | `effect-tsgo patch` runs on `bun install` and fails if the versions are not on `@effect/tsgo`'s support table, so they are bumped together in one grouped PR that CI either accepts or rejects.                                |
+| `@ampcode/plugin`                                                            | exact | Published daily as `0.0.0-<date>-<sha>` under the `latest` dist-tag. A semver range resolves to the stale `0.0.0-dev` stub (alphanumeric prerelease identifiers sort above numeric ones), so Renovate follows the tag instead. |
+| `effect`                                                                     | `^`   | `^4.0.0-rc.N` accepts later release candidates, `4.0.0`, and `4.x`. Release candidates have renamed APIs, so each bump is a PR; Renovate's `rangeStrategy: bump` keeps the range's lower bound at the version actually tested. |
+| `@effect/platform-bun`, `@effect/vitest`                                     | exact | Released in lockstep with `effect` (same rc number) and grouped with it, so the three move in one PR.                                                                                                                          |
+| `vitest`, `@types/bun`, `@types/node`, `dprint`                              | `^`   | Not coupled to anything. `@types/node` stays on the major in `.node-version`; Node majors are bumped by hand (see Testing).                                                                                                    |
 
 ## Contributing a plugin
 

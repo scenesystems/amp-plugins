@@ -28,6 +28,12 @@ The agent reads tool output and errors, so those strings are the product: they a
 - Effects are explicit. Configuration is `Config`/`Redacted`, IO is a service (`HttpClient`, `FileSystem`, `Clock`),
   logging goes through Amp. Anything a plugin reaches for directly (`process.env`, `console`, `Bun.*`) is both a lint
   error and a sign the code cannot be tested at the seam it should be.
+- Effect-native means the whole language, not just the effect type. Data is `Schema`/`Data` (tagged enums and errors,
+  decoded at the boundary, never cast), collections go through `Array`/`Record`/`HashMap`, branching through `Match`
+  and `Option`, mutation through `Ref`. The lint (`effecttsgo` type-aware rules plus our own `effect-native` plugin in
+  `lint/`) enforces this and every message names the replacement, so a lint error is a design hint, not a formality.
+  The only sanctioned escapes are the edges we do not own (Amp's Promise API, a `Proxy` over a host interface, a
+  script's entry point), each with a `-- reason` on the disable.
 - `bun run ci` is the definition of done: types, lint, formatting, unit tests, build, and the bundle smoke test.
   Formatting and lint fixes are automated (`bun run lint:fix`); do not hand-format.
 - Dependencies are deliberate. Ranges say what we accept, the lockfile says what we tested, and Renovate turns the gap

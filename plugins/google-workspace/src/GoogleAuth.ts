@@ -189,22 +189,19 @@ export const signServiceAccountJwt = (
     return `${header}.${payload}.${Encoding.encodeBase64Url(new Uint8Array(signature))}`
   })
 
-const decodeTokenError = Schema.decodeUnknownOption(TokenError)
-const decodeErrorBody = Schema.decodeUnknownOption(ErrorBody)
-
-const parseJson = Option.liftThrowable((text: string): unknown => JSON.parse(text))
+const decodeTokenError = Schema.decodeUnknownOption(Schema.fromJsonString(TokenError))
+const decodeErrorBody = Schema.decodeUnknownOption(Schema.fromJsonString(ErrorBody))
 
 /**
  * One line from an error body: `error: error_description` for an OAuth2/STS body,
  * `status: message` for a Google API envelope, else the raw body, else a placeholder.
  */
 const summarizeErrorBody = (text: string): string => {
-  const json = parseJson(text)
-  const oauth = Option.flatMap(json, decodeTokenError).pipe(
+  const oauth = decodeTokenError(text).pipe(
     Option.map((body) => [body.error, body.error_description]),
     Option.filter((parts) => parts.some((p) => p !== undefined && p !== ""))
   )
-  const api = Option.flatMap(json, decodeErrorBody).pipe(
+  const api = decodeErrorBody(text).pipe(
     Option.map((body) => [body.error?.status, body.error?.message]),
     Option.filter((parts) => parts.some((p) => p !== undefined && p !== ""))
   )
@@ -243,7 +240,7 @@ export const HINTS = {
     "Grant roles/iam.serviceAccountTokenCreator on the service account to the pool's principalSet for this workspace (plugins/google-workspace/scripts/google-setup.sh --delegation does this).",
   delegation:
     "Domain-wide delegation must grant this service account's client ID this exact scope in the Google Workspace admin console."
-} as const
+}
 
 /**
  * Builds the service from `Amp` (for the current user's email), an `HttpClient`, the `FileSystem`
@@ -296,7 +293,7 @@ export const make: Effect.Effect<Shape, never, Requirements> = Effect.gen(functi
           hint: step.hint
         })
       }
-      return yield* Schema.decodeUnknownEffect(body)(Option.getOrNull(parseJson(text))).pipe(
+      return yield* Schema.decodeEffect(Schema.fromJsonString(body))(text).pipe(
         Effect.mapError(() =>
           new Credential.CredentialError({ message: `${step.response} did not include ${step.expected}.` })
         )
@@ -390,10 +387,11 @@ export const make: Effect.Effect<Shape, never, Requirements> = Effect.gen(functi
           asServiceAccount("generateAccessToken", { scope: [requestedScope], lifetime: IMPERSONATED_TOKEN_LIFETIME }),
           GeneratedAccessToken
         )
-        return {
+        const cached: CachedToken = {
           token: Redacted.make(generated.accessToken),
           expiresAtMillis: DateTime.toEpochMillis(generated.expireTime)
-        } satisfies CachedToken
+        }
+        return cached
       }
 
       const signed = yield* call(

@@ -23,10 +23,13 @@ import type {
   PluginToolResult,
   Subscription
 } from "@ampcode/plugin"
+import * as Arr from "effect/Array"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import { identity } from "effect/Function"
 import type * as ManagedRuntime from "effect/ManagedRuntime"
+import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as SchemaAST from "effect/SchemaAST"
 import * as ToolError from "./ToolError.ts"
@@ -44,7 +47,7 @@ export type InputSchema = Schema.Top & { readonly "DecodingServices": never }
  *
  * @category models
  */
-export interface Tool<in out S extends InputSchema, out E, out R> {
+export interface Tool<S extends InputSchema, out E, out R> {
   /** Tool name (must match ^[a-zA-Z0-9_-]+$). Sent to the LLM. */
   readonly name: string
   /** Display title shown in Amp clients instead of the raw name. Not sent to the LLM. */
@@ -59,9 +62,22 @@ export interface Tool<in out S extends InputSchema, out E, out R> {
    * `NaN`/`Infinity` and so does not serialise to a plain JSON Schema `number`.
    */
   readonly input: S
-  /** Tool body. Failures are rendered for the agent; defects are reported with their cause. */
-  readonly execute: (input: S["Type"], ctx: PluginToolContext) => Effect.Effect<PluginToolResult, E, R>
+  /**
+   * Tool body. Failures are rendered for the agent; defects are reported with their cause.
+   *
+   * Declared as a method so tools with different input schemas share the supertype {@link Any}:
+   * method parameters are checked bivariantly, a property would make `S` invariant.
+   */
+  execute(input: S["Type"], ctx: PluginToolContext): Effect.Effect<PluginToolResult, E, R>
 }
+
+/**
+ * Any tool that runs on `R`, whatever its input schema and error type: the element type of a
+ * plugin's tool list.
+ *
+ * @category models
+ */
+export type Any<R = never> = Tool<InputSchema, unknown, R>
 
 /**
  * Identity constructor that pins type inference for a tool definition.
@@ -80,7 +96,7 @@ export const make = <S extends InputSchema, E, R>(tool: Tool<S, E, R>): Tool<S, 
  */
 export const toInputSchema = (schema: Schema.Top): PluginToolDefinition["inputSchema"] => {
   const document = Schema.toJsonSchemaDocument(schema, { referencePolicy: () => undefined })
-  const { $schema: _dialect, ...rest } = document.schema as Record<string, unknown>
+  const { $schema: _dialect, ...rest } = document.schema
   // `Schema.Struct({})` accepts any non-null object and renders as `anyOf: [object, array]`;
   // a tool without parameters is just an empty object schema.
   if (SchemaAST.isObjects(schema.ast) && schema.ast.propertySignatures.length === 0) {
@@ -96,15 +112,9 @@ export const toInputSchema = (schema: Schema.Top): PluginToolDefinition["inputSc
  *
  * @category rendering
  */
-export const renderCause = <E>(cause: Cause.Cause<E>): string => {
-  for (const reason of cause.reasons) {
-    if (Cause.isFailReason(reason)) {
-      const rendered = ToolError.render(reason.error)
-      if (rendered !== undefined) return rendered
-    }
-  }
-  return `Tool failed unexpectedly:\n${Cause.pretty(cause)}`
-}
+export const renderCause = <E>(cause: Cause.Cause<E>): string =>
+  Arr.findFirst(cause.reasons, (reason) => Cause.isFailReason(reason) ? ToolError.render(reason.error) : Option.none())
+    .pipe(Option.getOrElse(() => `Tool failed unexpectedly:\n${Cause.pretty(cause)}`))
 
 /**
  * Converts a `Tool` into a `PluginToolDefinition` that runs on `runtime`.
@@ -124,16 +134,26 @@ export const toPluginTool =
       description: tool.description,
       inputSchema: toInputSchema(tool.input),
       // `runPromiseExit` rather than `runPromise`: building the runtime's layer happens outside the
-      // effect, so a layer failure would otherwise reject the promise instead of reaching `catchCause`.
+      // effect, so a layer failure would otherwise reject the promise instead of reaching the Exit.
+      // Rendering that Exit is the one place the plugin leaves Effect: Amp's `execute` contract is a
+      // Promise, and this is where it is produced from an effect that cannot fail.
       execute: (raw, ctx) =>
-        runtime.runPromiseExit(
-          Effect.flatMap(decode(raw), (input) => tool.execute(input, ctx)).pipe(
-            Effect.withSpan(`tool.${tool.name}`)
+        // oxlint-disable-next-line effect-native/entry-point -- the Effect/Promise edge Amp's PluginToolDefinition.execute requires
+        Effect.runPromise(
+          Effect.map(
+            Effect.promise(() =>
+              runtime.runPromiseExit(
+                Effect.flatMap(decode(raw), (input) => tool.execute(input, ctx)).pipe(
+                  Effect.withSpan(`tool.${tool.name}`)
+                )
+              )
+            ),
+            Exit.match({ onSuccess: identity, onFailure: renderCause })
           )
-        ).then((exit) => Exit.isSuccess(exit) ? exit.value : renderCause(exit.cause))
+        ),
+      ...(tool.title === undefined ? {} : { title: tool.title }),
+      ...(tool.transcriptGroup === undefined ? {} : { transcriptGroup: tool.transcriptGroup })
     }
-    if (tool.title !== undefined) definition.title = tool.title
-    if (tool.transcriptGroup !== undefined) definition.transcriptGroup = tool.transcriptGroup
     return definition
   }
 
@@ -145,13 +165,11 @@ export const toPluginTool =
 export const registerAll = <R>(
   api: PluginAPI,
   runtime: ManagedRuntime.ManagedRuntime<R, never>,
-  tools: ReadonlyArray<Tool<any, any, R>>
+  tools: ReadonlyArray<Any<R>>
 ): Subscription => {
   const convert = toPluginTool(runtime)
   const subscriptions = tools.map((tool) => api.registerTool(convert(tool)))
   return {
-    unsubscribe: () => {
-      for (const subscription of subscriptions) subscription.unsubscribe()
-    }
+    unsubscribe: () => Arr.forEach(subscriptions, (subscription) => subscription.unsubscribe())
   }
 }

@@ -1,6 +1,10 @@
 import { describe, it } from "@effect/vitest"
 import * as Assert from "@effect/vitest/utils"
+import * as Arr from "effect/Array"
+import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import * as Result from "effect/Result"
+import * as Schema from "effect/Schema"
 import * as FastCheck from "effect/testing/FastCheck"
 import * as TestSchema from "effect/testing/TestSchema"
 import * as Format from "../src/Format.ts"
@@ -62,82 +66,67 @@ const rows = FastCheck.array(FastCheck.array(cell, { minLength: 1, maxLength: 6 
 const cellText = (value: Model.CellValue | undefined): string =>
   value === null || value === undefined ? "" : String(value)
 
+const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
+
 /**
  * Strict RFC 4180 reader. Quoted fields may hold commas, doubled quotes, and line breaks; an unquoted field may
- * not contain `"`, `\r`, or `\n`, and a closing quote must be followed by a separator. Anything else throws, so
- * the round-trip property fails if `toCsv` ever emits something a conforming reader would reject.
+ * not contain `"`, `\r`, or `\n`, and a closing quote must be followed by a separator. Anything else fails, so
+ * the round-trip property reports if `toCsv` ever emits something a conforming reader would reject.
  */
-const parseCsv = (csv: string): Array<Array<string>> => {
-  const out: Array<Array<string>> = []
-  let row: Array<string> = []
-  let i = 0
-  const fail = (why: string): never => {
-    throw new Error(`${why} at offset ${i} in ${JSON.stringify(csv)}`)
+type CsvToken = { readonly field: string; readonly sep: "," | "\n" | "end"; readonly end: number }
+
+const parseCsv = (csv: string): Result.Result<Array<Array<string>>, string> => {
+  const failure = (why: string, offset: number) => Result.fail(`${why} at offset ${offset} in ${toJson(csv)}`)
+  /** The field starting at `i`: the unescaped text and the offset just past it (before any separator). */
+  const readField = (i: number): Result.Result<{ readonly text: string; readonly end: number }, string> => {
+    const quoted = /"((?:[^"]|"")*)"/y
+    const unquoted = /[^",\r\n]*/y
+    quoted.lastIndex = i
+    unquoted.lastIndex = i
+    return csv[i] === "\""
+      ? Option.match(Option.fromNullishOr(quoted.exec(csv)), {
+        onNone: () => failure("unterminated quoted field", i),
+        onSome: (match) => Result.succeed({ text: (match[1] ?? "").replace(/""/g, "\""), end: i + match[0].length })
+      })
+      : Option.match(Option.fromNullishOr(unquoted.exec(csv)), {
+        onNone: () => failure("unreadable field", i),
+        onSome: (match) => Result.succeed({ text: match[0], end: i + match[0].length })
+      })
   }
-  const readField = (): string => {
-    let field = ""
-    if (csv[i] === "\"") {
-      i++
-      for (;;) {
-        if (i >= csv.length) return fail("unterminated quoted field")
-        const ch = csv[i]!
-        if (ch === "\"") {
-          if (csv[i + 1] === "\"") {
-            field += "\""
-            i += 2
-            continue
-          }
-          i++
-          if (i < csv.length && csv[i] !== "," && csv[i] !== "\n") fail("text after closing quote")
-          return field
+  const tokens = Arr.unfold(Option.some(0), (offset) =>
+    Option.map(offset, (i) => {
+      const token: Result.Result<CsvToken, string> = Result.flatMap(
+        readField(i),
+        ({ end, text }): Result.Result<CsvToken, string> => {
+          const separator = csv[end]
+          return separator === undefined
+            ? Result.succeed({ field: text, sep: "end", end })
+            : separator === "," || separator === "\n"
+            ? Result.succeed({ field: text, sep: separator, end })
+            : failure(csv[i] === "\"" ? "text after closing quote" : `unquoted ${toJson(separator)}`, end)
         }
-        field += ch
-        i++
-      }
-    }
-    while (i < csv.length && csv[i] !== "," && csv[i] !== "\n") {
-      const ch = csv[i]!
-      if (ch === "\"" || ch === "\r") fail(`unquoted ${JSON.stringify(ch)}`)
-      field += ch
-      i++
-    }
-    return field
-  }
-  for (;;) {
-    row.push(readField())
-    if (i >= csv.length) break
-    if (csv[i] === ",") {
-      i++
-    } else {
-      i++
-      out.push(row)
-      row = []
-    }
-  }
-  out.push(row)
-  return out
+      )
+      const next = Result.isSuccess(token) && token.success.sep !== "end"
+        ? Option.some(token.success.end + 1)
+        : Option.none()
+      return [token, next]
+    }))
+  return Result.map(Result.all(tokens), (tokens) => {
+    const initial: { readonly rows: Array<Array<string>>; readonly row: Array<string> } = { rows: [], row: [] }
+    const parsed = Arr.reduce(tokens, initial, (acc, token) => {
+      const row = Arr.append(acc.row, token.field)
+      return token.sep === "\n" ? { rows: Arr.append(acc.rows, row), row: [] } : { rows: acc.rows, row }
+    })
+    return Arr.append(parsed.rows, parsed.row)
+  })
 }
 
 /** Splits a Markdown table row on unescaped pipes, returning the trimmed cells. */
 const splitTableRow = (line: string): Array<string> => {
-  const cells: Array<string> = []
-  let current = ""
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]!
-    if (ch === "\\" && line[i + 1] === "|") {
-      current += "|"
-      i++
-    } else if (ch === "|") {
-      cells.push(current)
-      current = ""
-    } else {
-      current += ch
-    }
-  }
-  cells.push(current)
+  const cells = line.split(/(?<!\\)\|/).map((cell) => cell.replace(/\\\|/g, "|"))
   // A well-formed row starts and ends with a pipe, so the first and last pieces are the empty margins.
-  Assert.strictEqual(cells[0], "", `row must start with a pipe: ${line}`)
-  Assert.strictEqual(cells[cells.length - 1], "", `row must end with a pipe: ${line}`)
+  Assert.assertSome(Arr.head(cells), "")
+  Assert.assertSome(Arr.last(cells), "")
   return cells.slice(1, -1).map((c) => c.trim())
 }
 
@@ -148,25 +137,14 @@ const columnIndex = (letters: string): number =>
 /** Reads the single-quoted literal following `prefix` in a Drive query and unescapes it. */
 const quotedAfter = (query: string, prefix: string): string => {
   const start = query.indexOf(prefix)
-  Assert.assertTrue(start >= 0, `expected ${JSON.stringify(prefix)} in ${query}`)
-  let i = start + prefix.length
-  Assert.strictEqual(query[i], "'")
-  i++
-  let out = ""
-  for (; i < query.length; i++) {
-    const ch = query[i]!
-    if (ch === "\\") {
-      const next = query[i + 1]
-      Assert.assertTrue(next === "\\" || next === "'", `only \\\\ and \\' are valid escapes, got \\${next}`)
-      out += next
-      i++
-    } else if (ch === "'") {
-      return out
-    } else {
-      out += ch
-    }
-  }
-  throw new Error(`unterminated literal in ${query}`)
+  Assert.assertTrue(start >= 0, `expected ${toJson(prefix)} in ${query}`)
+  const literalPattern = /'((?:\\[\\']|[^\\'])*)'/y
+  literalPattern.lastIndex = start + prefix.length
+  const match = Option.fromNullishOr(literalPattern.exec(query))
+  Assert.assertTrue(Option.isSome(match), `unterminated literal in ${query}`)
+  const escaped = Option.fromUndefinedOr(match.value[1])
+  Assert.assertTrue(Option.isSome(escaped), `missing literal capture in ${query}`)
+  return escaped.value.replace(/\\([\\'])/g, "$1")
 }
 
 const doc = new Model.DriveFile({
@@ -224,26 +202,35 @@ describe("Format.parseFileRef", () => {
 describe("Format.FileRef schema", () => {
   const asserts = new TestSchema.Asserts(Format.FileRef())
 
-  it("decodes ids and URLs into a FileRef", async () => {
-    await asserts.decoding().succeed("1DocVision0000000000", { id: "1DocVision0000000000" })
-    await asserts.decoding().succeed("https://docs.google.com/spreadsheets/d/1SheetId000000000000/edit#gid=7", {
-      id: "1SheetId000000000000",
-      gid: 7
-    })
-  })
+  it.effect("decodes ids and URLs into a FileRef", () =>
+    Effect.gen(function*() {
+      yield* Effect.promise(() => asserts.decoding().succeed("1DocVision0000000000", { id: "1DocVision0000000000" }))
+      yield* Effect.promise(() =>
+        asserts.decoding().succeed("https://docs.google.com/spreadsheets/d/1SheetId000000000000/edit#gid=7", {
+          id: "1SheetId000000000000",
+          gid: 7
+        })
+      )
+    }))
 
-  it("fails decoding with a message the agent can act on", async () => {
-    await asserts.decoding().fail(
-      "nope",
-      "\"nope\" is not a Google Drive file ID or docs.google.com/drive.google.com URL."
-    )
-    await asserts.decoding().fail(42, "Expected string")
-  })
+  it.effect("fails decoding with a message the agent can act on", () =>
+    Effect.gen(function*() {
+      yield* Effect.promise(() =>
+        asserts.decoding().fail(
+          "nope",
+          "\"nope\" is not a Google Drive file ID or docs.google.com/drive.google.com URL."
+        )
+      )
+      yield* Effect.promise(() => asserts.decoding().fail(42, "Expected string"))
+    }))
 
-  it("encodes back to the bare id, dropping the gid", async () => {
-    await asserts.encoding().succeed({ id: "1DocVision0000000000", gid: 3 }, "1DocVision0000000000")
-    await asserts.encoding().succeed({ id: "1DocVision0000000000" }, "1DocVision0000000000")
-  })
+  it.effect("encodes back to the bare id, dropping the gid", () =>
+    Effect.gen(function*() {
+      yield* Effect.promise(() =>
+        asserts.encoding().succeed({ id: "1DocVision0000000000", gid: 3 }, "1DocVision0000000000")
+      )
+      yield* Effect.promise(() => asserts.encoding().succeed({ id: "1DocVision0000000000" }, "1DocVision0000000000"))
+    }))
 
   it("exposes the description on the string side, where the JSON Schema is generated from", () => {
     Assert.strictEqual(Format.FileRef().ast.annotations?.["description"], undefined)
@@ -314,7 +301,7 @@ describe("Format.kindOf", () => {
     { mimeType: Model.MIME.folder, kind: "Folder" },
     { mimeType: "text/csv", kind: "text/csv" }
   ])("$mimeType → $kind", ({ kind, mimeType }) => {
-    Assert.strictEqual(Format.kindOf({ mimeType }), kind)
+    Assert.strictEqual(Format.kindOf(mimeType), kind)
   })
 })
 
@@ -449,11 +436,13 @@ describe("Format.toMarkdownTable", () => {
     const width = Math.max(...rows.map((r) => r.length))
     const lines = Format.toMarkdownTable(rows, { headerRow }).split("\n")
     Assert.strictEqual(lines.length, headerRow ? rows.length + 1 : rows.length + 2)
-    for (const line of lines) Assert.strictEqual(splitTableRow(line).length, width, line)
-    Assert.deepStrictEqual(splitTableRow(lines[1]!), Array.from({ length: width }, () => "---"))
+    Arr.forEach(lines, (line) => Assert.strictEqual(splitTableRow(line).length, width, line))
+    const separator = Arr.get(lines, 1)
+    Assert.assertTrue(Option.isSome(separator), "Markdown table must contain a separator row")
+    Assert.deepStrictEqual(splitTableRow(separator.value), Arr.makeBy(width, () => "---"))
     const body = lines.slice(2).map(splitTableRow)
     const expected = (headerRow ? rows.slice(1) : rows).map((row) =>
-      Array.from({ length: width }, (_, i) => cellText(row[i]).replace(/\r?\n/g, " ").trim())
+      Arr.makeBy(width, (i) => cellText(row[i]).replace(/\r?\n/g, " ").trim())
     )
     Assert.deepStrictEqual(body, expected)
   })
@@ -471,7 +460,11 @@ describe("Format.toCsv", () => {
     "round-trips through an RFC 4180 reader",
     { rows },
     ({ rows }) => {
-      Assert.deepStrictEqual(parseCsv(Format.toCsv(rows)), rows.map((row) => row.map(cellText)))
+      const parsed = parseCsv(Format.toCsv(rows))
+      Result.match(parsed, {
+        onFailure: (error) => Assert.fail(error),
+        onSuccess: (parsedRows) => Assert.deepStrictEqual(parsedRows, rows.map((row) => row.map(cellText)))
+      })
     }
   )
 })
@@ -568,16 +561,16 @@ describe("Format.truncate", () => {
       maxChars: FastCheck.integer({ min: 0, max: 3000 })
     },
     ({ maxChars, text }) => {
-      const pages: Array<Format.Page> = []
-      let start: number | undefined = 0
-      while (start !== undefined) {
-        const page: Format.Page = Format.truncate(text, { startChar: start, maxChars })
-        pages.push(page)
+      const pages = Arr.unfold(Option.some(0), (startOption) =>
+        Option.map(startOption, (start) => {
+          const page = Format.truncate(text, { startChar: start, maxChars })
+          return [page, Option.fromNullishOr(page.nextStart)]
+        }))
+      Arr.forEach(pages, (page) => {
         Assert.strictEqual(page.total, text.length)
         Assert.assertTrue(page.text.length <= Math.max(maxChars, 1000))
         Assert.strictEqual(page.truncated, page.nextStart !== undefined)
-        start = page.nextStart
-      }
+      })
       Assert.strictEqual(pages.map((p) => p.text).join(""), text)
       Assert.assertTrue(pages.slice(0, -1).every((p) => p.text.length === Math.max(maxChars, 1000)))
     }

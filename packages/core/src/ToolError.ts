@@ -6,6 +6,17 @@
  * Use `ToolError` when you want to attach a remediation hint.
  */
 import * as Data from "effect/Data"
+import * as Option from "effect/Option"
+import * as Predicate from "effect/Predicate"
+
+/**
+ * A string property read through the prototype chain, because Effect's own errors (for example
+ * `SchemaError`) expose `message` as a getter rather than an own property.
+ */
+const stringProperty = (key: string) => (value: unknown): Option.Option<string> =>
+  Predicate.hasProperty(value, key) && Predicate.isString(value[key]) ? Option.some(value[key]) : Option.none()
+const messageOf = stringProperty("message")
+const tagOf = stringProperty("_tag")
 
 /**
  * A recoverable tool failure with an actionable message for the agent.
@@ -25,18 +36,16 @@ export class ToolError extends Data.TaggedError("ToolError")<{
 }> {}
 
 /**
- * Renders an error value as text for the agent. Returns `undefined` when the
- * value carries no usable `message`, so callers can fall back to a full cause dump.
+ * Renders an error value as text for the agent. `None` when the value carries no
+ * usable `message`, so callers can fall back to a full cause dump.
  *
  * @category rendering
  */
-export const render = (error: unknown): string | undefined => {
+export const render = (error: unknown): Option.Option<string> => {
   if (error instanceof ToolError) {
-    return error.hint === undefined ? `Error: ${error.message}` : `Error: ${error.message}\nHint: ${error.hint}`
+    return Option.some(
+      error.hint === undefined ? `Error: ${error.message}` : `Error: ${error.message}\nHint: ${error.hint}`
+    )
   }
-  if (typeof error === "object" && error !== null && "message" in error && typeof error.message === "string") {
-    const tag = "_tag" in error && typeof error._tag === "string" ? error._tag : "Error"
-    return `${tag}: ${error.message}`
-  }
-  return undefined
+  return Option.map(messageOf(error), (message) => `${Option.getOrElse(tagOf(error), () => "Error")}: ${message}`)
 }

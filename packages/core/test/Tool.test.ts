@@ -5,12 +5,15 @@ import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as ManagedRuntime from "effect/ManagedRuntime"
+import * as EffectRecord from "effect/Record"
 import * as Schema from "effect/Schema"
 import * as Tool from "../src/Tool.ts"
 import { ToolError } from "../src/ToolError.ts"
 
 const runtime = ManagedRuntime.make(Layer.empty)
 const ctx = PluginApi.make().toolContext
+
+class Boom extends Schema.TaggedError<Boom>()("Boom", { message: Schema.String }) {}
 
 const Echo = Tool.make({
   name: "echo",
@@ -27,7 +30,7 @@ const Echo = Tool.make({
 const tool = <S extends Tool.InputSchema, E>(definition: Tool.Tool<S, E, never>) =>
   Tool.toPluginTool(runtime)(definition)
 
-const run = (definition: Tool.Tool<any, any, never>, input: Record<string, unknown>) =>
+const run = (definition: Tool.Any, input: Record<string, unknown>) =>
   Effect.promise(() => tool(definition).execute(input, ctx))
 
 describe("Tool.toInputSchema", () => {
@@ -50,7 +53,7 @@ describe("Tool.toInputSchema", () => {
   it("inlines named schemas instead of emitting $defs", () => {
     class Named extends Schema.Class<Named>("Named")({ id: Schema.String }) {}
     const schema = Tool.toInputSchema(Schema.Struct({ item: Named }))
-    Assert.deepStrictEqual(Object.keys(schema).sort(), ["additionalProperties", "properties", "required", "type"])
+    Assert.deepStrictEqual(EffectRecord.keys(schema).sort(), ["additionalProperties", "properties", "required", "type"])
     Assert.deepStrictEqual(schema.properties, {
       item: {
         type: "object",
@@ -86,7 +89,13 @@ describe("Tool.toPluginTool", () => {
       execute: () => Effect.succeed("")
     })
     const definition = tool(Bare)
-    Assert.deepStrictEqual(Object.keys(definition).sort(), ["description", "execute", "inputSchema", "name"])
+    const definitionRecord = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Unknown))(definition)
+    Assert.deepStrictEqual(EffectRecord.keys(definitionRecord).sort(), [
+      "description",
+      "execute",
+      "inputSchema",
+      "name"
+    ])
   })
 
   it.effect("decodes input and runs the effect", () =>
@@ -127,14 +136,11 @@ describe("Tool.toPluginTool", () => {
         name: "dying",
         description: "Throws",
         input: Schema.Struct({}),
-        execute: () =>
-          Effect.sync(() => {
-            throw new Error("kaboom")
-          })
+        execute: () => Effect.die(new Boom({ message: "kaboom" }))
       })
       const result = yield* run(Dying, {})
       Assert.assertTrue(typeof result === "string")
-      Assert.assertMatch(result, /^Tool failed unexpectedly:\nError: kaboom\n {4}at /)
+      Assert.assertMatch(result, /^Tool failed unexpectedly:\nBoom: kaboom\n {4}at /)
     }))
 
   it.effect("never rejects: the promise resolves even for a defect", () =>
@@ -150,7 +156,7 @@ describe("Tool.toPluginTool", () => {
 describe("Tool.renderCause", () => {
   it("renders typed failures tersely and everything else with the full cause", () => {
     Assert.strictEqual(Tool.renderCause(Cause.fail(new ToolError({ message: "m", hint: "h" }))), "Error: m\nHint: h")
-    Assert.strictEqual(Tool.renderCause(Cause.fail(new Error("plain error"))), "Error: plain error")
+    Assert.strictEqual(Tool.renderCause(Cause.fail(new Boom({ message: "plain error" }))), "Boom: plain error")
     Assert.strictEqual(Tool.renderCause(Cause.fail({ _tag: "Custom", message: "objecty" })), "Custom: objecty")
     Assert.strictEqual(Tool.renderCause(Cause.fail({ message: "untagged" })), "Error: untagged")
     Assert.assertMatch(
@@ -180,7 +186,7 @@ describe("Tool.registerAll", () => {
       const subscription = Tool.registerAll(fake.api, runtime, [Echo, Second])
       Assert.deepStrictEqual(fake.tools.map((t) => t.name), ["echo", "second"])
       Assert.strictEqual(
-        yield* Effect.promise(() => fake.tool("echo").execute({ message: "hi" }, fake.toolContext)),
+        yield* fake.execute("echo", { message: "hi" }),
         "hi"
       )
       subscription.unsubscribe()

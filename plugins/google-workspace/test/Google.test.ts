@@ -63,7 +63,7 @@ describe("Google request wiring", () => {
       const { service } = yield* google(stub)
       Assert.deepStrictEqual(yield* service.about, { user: { emailAddress: "sa@example.test", displayName: "Robot" } })
       Assert.strictEqual(stub.requests.length, 1)
-      const request = stub.requests[0]!
+      const request = Http.request(stub, 0)
       Assert.strictEqual(Http.endpoint(request), `GET ${DRIVE}/about`)
       Assert.deepStrictEqual(Http.query(request), { fields: "user(emailAddress,displayName)" })
       Assert.strictEqual(bearer(request), "Bearer token-0")
@@ -74,7 +74,7 @@ describe("Google request wiring", () => {
       const stub = Http.stub(() => Http.jsonResponse({ ...file, kind: "drive#file", unknownField: 1 }))
       const { service } = yield* google(stub)
       Assert.assertEquals(yield* service.getFile(file.id), new Model.DriveFile(file))
-      const request = stub.requests[0]!
+      const request = Http.request(stub, 0)
       Assert.strictEqual(Http.endpoint(request), `GET ${DRIVE}/files/${file.id}`)
       Assert.deepStrictEqual(Http.query(request), { fields: Model.FILE_FIELDS, supportsAllDrives: "true" })
     }))
@@ -84,7 +84,7 @@ describe("Google request wiring", () => {
       const stub = Http.stub(() => Http.jsonResponse(file))
       const { service } = yield* google(stub)
       yield* service.getFile("weird/id?x")
-      Assert.strictEqual(stub.requests[0]!.url.pathname, "/drive/v3/files/weird%2Fid%3Fx")
+      Assert.strictEqual(Http.request(stub, 0).url.pathname, "/drive/v3/files/weird%2Fid%3Fx")
     }))
 
   it.effect("getFile: follows a shortcut to its target with a second request", () =>
@@ -118,7 +118,7 @@ describe("Google request wiring", () => {
       const stub = Http.stub(() => Http.jsonResponse({ files: [file], nextPageToken: "ignored" }))
       const { service } = yield* google(stub)
       Assert.assertEquals(yield* service.listFiles({ q: "trashed = false" }), [new Model.DriveFile(file)])
-      const request = stub.requests[0]!
+      const request = Http.request(stub, 0)
       Assert.strictEqual(Http.endpoint(request), `GET ${DRIVE}/files`)
       Assert.deepStrictEqual(Http.query(request), {
         q: "trashed = false",
@@ -143,8 +143,8 @@ describe("Google request wiring", () => {
       const stub = Http.stub(() => Http.jsonResponse({}))
       const { service } = yield* google(stub)
       Assert.deepStrictEqual(yield* service.listFiles({ q: "q", pageSize, orderBy: "name" }), [])
-      Assert.strictEqual(Http.query(stub.requests[0]!)["pageSize"], sent)
-      Assert.strictEqual(Http.query(stub.requests[0]!)["orderBy"], "name")
+      Assert.strictEqual(Http.query(Http.request(stub, 0))["pageSize"], sent)
+      Assert.strictEqual(Http.query(Http.request(stub, 0))["orderBy"], "name")
     }))
 
   it.effect("exportFile: GET files/{id}/export?mimeType= and returns the body text", () =>
@@ -152,7 +152,7 @@ describe("Google request wiring", () => {
       const stub = Http.stub(() => Http.textResponse("# Vision\n\nBody", 200, "text/markdown"))
       const { service } = yield* google(stub)
       Assert.strictEqual(yield* service.exportFile(file.id, "text/markdown"), "# Vision\n\nBody")
-      const request = stub.requests[0]!
+      const request = Http.request(stub, 0)
       Assert.strictEqual(Http.endpoint(request), `GET ${DRIVE}/files/${file.id}/export`)
       Assert.deepStrictEqual(Http.query(request), { mimeType: "text/markdown" })
     }))
@@ -162,7 +162,7 @@ describe("Google request wiring", () => {
       const stub = Http.stub(() => Http.textResponse("a,b\n1,2", 200, "text/csv"))
       const { service } = yield* google(stub)
       Assert.strictEqual(yield* service.downloadFile(file.id), "a,b\n1,2")
-      const request = stub.requests[0]!
+      const request = Http.request(stub, 0)
       Assert.strictEqual(Http.endpoint(request), `GET ${DRIVE}/files/${file.id}`)
       Assert.deepStrictEqual(Http.query(request), { alt: "media", supportsAllDrives: "true" })
     }))
@@ -177,7 +177,7 @@ describe("Google request wiring", () => {
         yield* service.createFile({ name: "Contract Doc", mimeType: Model.MIME.doc, parents: ["1Folder000000000000"] }),
         new Model.DriveFile({ id: "1NewDoc0000000000000", name: "Contract Doc", mimeType: Model.MIME.doc })
       )
-      const request = stub.requests[0]!
+      const request = Http.request(stub, 0)
       Assert.strictEqual(Http.endpoint(request), `POST ${DRIVE}/files`)
       Assert.deepStrictEqual(Http.query(request), { fields: Model.FILE_FIELDS, supportsAllDrives: "true" })
       Assert.strictEqual(request.request.headers["content-type"], "application/json")
@@ -193,7 +193,7 @@ describe("Google request wiring", () => {
       const stub = Http.stub(() => Http.emptyResponse(204))
       const { service } = yield* google(stub)
       Assert.strictEqual(yield* service.deleteFile(file.id), undefined)
-      const request = stub.requests[0]!
+      const request = Http.request(stub, 0)
       Assert.strictEqual(Http.endpoint(request), `DELETE ${DRIVE}/files/${file.id}`)
       Assert.deepStrictEqual(Http.query(request), { supportsAllDrives: "true" })
     }))
@@ -223,8 +223,8 @@ describe("Google request wiring", () => {
           `GET ${DRIVE}/files/${file.id}/comments`,
           `GET ${DRIVE}/files/${file.id}/comments`
         ])
-        Assert.deepStrictEqual(Http.query(stub.requests[0]!), { pageSize: "100", fields: Model.COMMENT_FIELDS })
-        Assert.deepStrictEqual(Http.query(stub.requests[1]!), {
+        Assert.deepStrictEqual(Http.query(Http.request(stub, 0)), { pageSize: "100", fields: Model.COMMENT_FIELDS })
+        Assert.deepStrictEqual(Http.query(Http.request(stub, 1)), {
           pageSize: "100",
           fields: Model.COMMENT_FIELDS,
           pageToken: "page-2"
@@ -260,7 +260,7 @@ describe("Google request wiring", () => {
         const stub = Http.stub(() => Http.jsonResponse(comment("c9")))
         const { service } = yield* google(stub)
         Assert.assertEquals(yield* service.createComment(file.id, "Looks good"), new Model.DriveComment(comment("c9")))
-        const request = stub.requests[0]!
+        const request = Http.request(stub, 0)
         Assert.strictEqual(Http.endpoint(request), `POST ${DRIVE}/files/${file.id}/comments`)
         Assert.deepStrictEqual(Http.query(request), {
           fields: "id,content,createdTime,author(displayName,emailAddress)"
@@ -286,7 +286,7 @@ describe("Google request wiring", () => {
         const stub = Http.stub(() => Http.jsonResponse(spreadsheet))
         const { service } = yield* google(stub)
         Assert.assertEquals(yield* service.getSpreadsheet(sheetId), new Model.Spreadsheet(spreadsheet))
-        const request = stub.requests[0]!
+        const request = Http.request(stub, 0)
         Assert.strictEqual(Http.endpoint(request), `GET ${SHEETS}/spreadsheets/${sheetId}`)
         Assert.deepStrictEqual(Http.query(request), { fields: Model.SPREADSHEET_FIELDS })
       }))
@@ -301,7 +301,7 @@ describe("Google request wiring", () => {
         const { service } = yield* google(stub)
         Assert.deepStrictEqual(yield* service.getValues(sheetId, "'My Tab'!A1:B2"), [["a", 1], [true, null]])
         Assert.deepStrictEqual(yield* service.getValues(sheetId, "Empty!A1"), [])
-        const request = stub.requests[0]!
+        const request = Http.request(stub, 0)
         Assert.strictEqual(request.url.pathname, `/v4/spreadsheets/${sheetId}/values/'My%20Tab'!A1%3AB2`)
         Assert.deepStrictEqual(Http.query(request), {
           valueRenderOption: "FORMATTED_VALUE",
@@ -328,7 +328,7 @@ describe("Google request wiring", () => {
           updatedColumns: 2,
           updatedCells: 4
         })
-        const request = stub.requests[0]!
+        const request = Http.request(stub, 0)
         Assert.strictEqual(Http.endpoint(request), `PUT ${SHEETS}/spreadsheets/${sheetId}/values/Roadmap!A1%3AB2`)
         Assert.deepStrictEqual(Http.query(request), { valueInputOption: "USER_ENTERED" })
         Assert.deepStrictEqual(Http.jsonBody(request), {
@@ -345,7 +345,7 @@ describe("Google request wiring", () => {
         Assert.deepStrictEqual(yield* service.appendValues(sheetId, "Log!A1", [["x", "=SUM(A1:A4)"]]), {
           updates: { updatedRange: "Log!A5:B5", updatedRows: 1 }
         })
-        const request = stub.requests[0]!
+        const request = Http.request(stub, 0)
         Assert.strictEqual(Http.endpoint(request), `POST ${SHEETS}/spreadsheets/${sheetId}/values/Log!A1:append`)
         Assert.deepStrictEqual(Http.query(request), {
           valueInputOption: "USER_ENTERED",
@@ -375,8 +375,8 @@ describe("Google request wiring", () => {
           `GET ${DOCS}/documents/${docId}`,
           `POST ${DOCS}/documents/${docId}:batchUpdate`
         ])
-        Assert.deepStrictEqual(Http.query(stub.requests[0]!), { fields: "body(content(endIndex))" })
-        Assert.deepStrictEqual(Http.jsonBody(stub.requests[1]!), {
+        Assert.deepStrictEqual(Http.query(Http.request(stub, 0)), { fields: "body(content(endIndex))" })
+        Assert.deepStrictEqual(Http.jsonBody(Http.request(stub, 1)), {
           requests: [{ insertText: { location: { index: 244 }, text: "\nDecision: ship" } }]
         })
       }))
@@ -391,7 +391,7 @@ describe("Google request wiring", () => {
         const stub = Http.stub((_, i) => Http.jsonResponse(i === 0 ? body : {}))
         const { service } = yield* google(stub)
         yield* service.appendDocumentText(docId, "x")
-        Assert.deepStrictEqual(Http.jsonBody(stub.requests[1]!), {
+        Assert.deepStrictEqual(Http.jsonBody(Http.request(stub, 1)), {
           requests: [{ insertText: { location: { index }, text: "x" } }]
         })
       }))
@@ -525,9 +525,7 @@ describe("Google authentication and error handling", () => {
 
   it.effect("propagates a credential failure from GoogleAuth without calling Google", () =>
     Effect.gen(function*() {
-      const stub = Http.stub(() => {
-        throw new Error("Google must not be called without a token")
-      })
+      const stub = Http.script()
       const credentialError = new Credential.CredentialError({ message: "No Google credentials configured." })
       const auth = Layer.succeed(GoogleAuth)({
         credential: Effect.fail(credentialError),

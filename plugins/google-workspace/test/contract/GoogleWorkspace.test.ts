@@ -12,6 +12,7 @@ import { describe, it } from "@effect/vitest"
 import * as Assert from "@effect/vitest/utils"
 import { Amp } from "@scenesystems/amp-plugin-core"
 import { Assert as ExitAssert, PluginApi } from "@scenesystems/amp-plugin-testing"
+import * as Config from "effect/Config"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -22,7 +23,8 @@ import { layer } from "../../src/index.ts"
 import * as Model from "../../src/Model.ts"
 import * as Tools from "../../src/Tools.ts"
 
-const FOLDER = process.env["GOOGLE_WORKSPACE_CONTRACT_FOLDER"]!.trim()
+/** The Drive folder every fixture lives in; `setup.ts` has already failed the run if it is unset. */
+const folder = Config.string("GOOGLE_WORKSPACE_CONTRACT_FOLDER").pipe(Config.map((id) => id.trim()))
 const amp = PluginApi.make()
 const Live = layer.pipe(Layer.provide(Amp.layer(amp.api)))
 
@@ -35,7 +37,7 @@ const fixture = (kind: "Doc" | "Sheet") =>
       return yield* google.createFile({
         name: `amp-plugins contract ${kind} ${DateTime.formatIso(now)}`,
         mimeType: kind === "Doc" ? Model.MIME.doc : Model.MIME.sheet,
-        parents: [FOLDER]
+        parents: [yield* folder]
       })
     }),
     (file) => Google.use((google) => google.deleteFile(file.id)).pipe(Effect.orDie)
@@ -50,7 +52,7 @@ describe("Google Workspace contract", () => {
         const google = yield* Google
         const about = yield* google.about
         Assert.assertDefined(about.user?.emailAddress)
-        const whoami = PluginApi.text(yield* Tools.Whoami.execute({}, amp.toolContext))
+        const whoami = yield* PluginApi.text(yield* Tools.Whoami.execute({}, amp.toolContext))
         Assert.assertInclude(whoami, `Drive identity: ${about.user.emailAddress}`)
         Assert.assertInclude(whoami, `Scope: ${yield* auth.scope}`)
       }))
@@ -60,7 +62,7 @@ describe("Google Workspace contract", () => {
         const google = yield* Google
         const doc = yield* fixture("Doc")
         Assert.strictEqual(doc.mimeType, Model.MIME.doc)
-        Assert.deepStrictEqual(doc.parents, [FOLDER])
+        Assert.deepStrictEqual(doc.parents, [yield* folder])
 
         yield* google.appendDocumentText(doc.id, "\nContract line one.")
         Assert.assertInclude(yield* google.exportFile(doc.id, "text/plain"), "Contract line one.")
@@ -74,7 +76,7 @@ describe("Google Workspace contract", () => {
         )
 
         const found = yield* google.listFiles({
-          q: Format.driveQuery({ text: doc.name, nameOnly: true, folderId: FOLDER })
+          q: Format.driveQuery({ text: doc.name, nameOnly: true, folderId: yield* folder })
         })
         Assert.deepStrictEqual(found.map((f) => f.id), [doc.id])
 
@@ -82,7 +84,7 @@ describe("Google Workspace contract", () => {
         Assert.strictEqual(fetched.name, doc.name)
         Assert.assertDefined(fetched.webViewLink)
 
-        const read = PluginApi.text(yield* Tools.ReadDoc.execute({ file: { id: doc.id } }, amp.toolContext))
+        const read = yield* PluginApi.text(yield* Tools.ReadDoc.execute({ file: { id: doc.id } }, amp.toolContext))
         Assert.assertTrue(read.startsWith(`# ${doc.name}\n- Type: Google Doc\n- ID: ${doc.id}\n`), read)
         Assert.assertInclude(read, "\n\n---\n\n")
         Assert.assertInclude(read, "Contract line one.")
@@ -112,7 +114,7 @@ describe("Google Workspace contract", () => {
         Assert.strictEqual(appended.updates?.updatedRows, 1)
         Assert.deepStrictEqual(yield* google.getValues(sheet.id, range("A1:B3")), [["a", "1"], ["b", "2"], ["c", "3"]])
 
-        const read = PluginApi.text(
+        const read = yield* PluginApi.text(
           yield* Tools.ReadSheet.execute({ file: { id: sheet.id }, format: "csv" }, amp.toolContext)
         )
         Assert.assertInclude(

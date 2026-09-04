@@ -8,7 +8,9 @@ import * as FileSystem from "effect/FileSystem"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as PlatformError from "effect/PlatformError"
+import * as Record from "effect/Record"
 import * as Redacted from "effect/Redacted"
+import * as Schema from "effect/Schema"
 import * as TestSchema from "effect/testing/TestSchema"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -22,31 +24,37 @@ const KEY = {
   private_key:
     "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7\n-----END PRIVATE KEY-----\n"
 }
-const KEY_JSON = JSON.stringify({ type: "service_account", token_uri: "https://oauth2.googleapis.com/token", ...KEY })
+const KeyFile = Schema.Struct({
+  client_email: Schema.String,
+  private_key: Schema.String,
+  token_uri: Schema.optional(Schema.String),
+  type: Schema.optional(Schema.String)
+})
+const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
+const encodeKeyFile = Schema.encodeSync(Schema.fromJsonString(KeyFile))
+const KEY_JSON = encodeKeyFile({ type: "service_account", token_uri: "https://oauth2.googleapis.com/token", ...KEY })
 
 const serviceAccount = (subject: Option.Option<string>, tokenUri = "https://oauth2.googleapis.com/token") =>
-  ({
-    _tag: "ServiceAccount",
+  Credential.Credential.ServiceAccount({
     clientEmail: KEY.client_email,
     privateKey: Redacted.make(KEY.private_key),
     tokenUri,
     subject
-  }) satisfies Credential.ServiceAccount
+  })
 
 const PROVIDER = "projects/123456789012/locations/global/workloadIdentityPools/amp-orbs/providers/amp"
 const SA_EMAIL = "amp-google-workspace@example-project.iam.gserviceaccount.com"
 
 const workloadIdentity = (
   subject: Option.Option<string>,
-  subjectToken: Credential.SubjectTokenSource = { _tag: "AmpOrb" }
+  subjectToken: Credential.SubjectTokenSource = Credential.SubjectTokenSource.AmpOrb()
 ) =>
-  ({
-    _tag: "WorkloadIdentity",
+  Credential.Credential.WorkloadIdentity({
     provider: PROVIDER,
     serviceAccountEmail: SA_EMAIL,
     subject,
     subjectToken
-  }) satisfies Credential.WorkloadIdentity
+  })
 
 /** No files exist: any read is a `NotFound` platform error, like an unmounted secret. */
 const noFiles = FileSystem.layerNoop({
@@ -65,16 +73,13 @@ const noFiles = FileSystem.layerNoop({
 const files = (contents: Record<string, string>) =>
   FileSystem.layerNoop({
     readFileString: (path) =>
-      path in contents
-        ? Effect.succeed(contents[path]!)
-        : Effect.fail(
-          PlatformError.systemError({
-            _tag: "NotFound",
-            module: "FileSystem",
-            method: "readFileString",
-            pathOrDescriptor: path
-          })
-        )
+      Effect.fromOption(Record.get(contents, path), () =>
+        PlatformError.systemError({
+          _tag: "NotFound",
+          module: "FileSystem",
+          method: "readFileString",
+          pathOrDescriptor: path
+        }))
   })
 
 const env = (record: Record<string, string>) => ConfigProvider.layer(ConfigProvider.fromEnvRecord(record))
@@ -92,13 +97,13 @@ describe("Credential.resolve", () => {
   describe("service account", () => {
     it.effect("resolves an inline key and defaults the token URI", () =>
       Effect.gen(function*() {
-        const exit = yield* resolve({ GOOGLE_SERVICE_ACCOUNT_KEY: JSON.stringify(KEY) })
+        const exit = yield* resolve({ GOOGLE_SERVICE_ACCOUNT_KEY: encodeKeyFile(KEY) })
         ExitAssert.assertSucceeds(exit, serviceAccount(Option.none()))
       }))
 
     it.effect("keeps the key's own token_uri", () =>
       Effect.gen(function*() {
-        const custom = JSON.stringify({ ...KEY, token_uri: "https://oauth2.example.test/token" })
+        const custom = encodeKeyFile({ ...KEY, token_uri: "https://oauth2.example.test/token" })
         const exit = yield* resolve({ GOOGLE_SERVICE_ACCOUNT_KEY: custom })
         ExitAssert.assertSucceeds(exit, serviceAccount(Option.none(), "https://oauth2.example.test/token"))
       }))
@@ -123,7 +128,7 @@ describe("Credential.resolve", () => {
 
     it.effect("prefers GOOGLE_SERVICE_ACCOUNT_KEY_FILE over GOOGLE_APPLICATION_CREDENTIALS", () =>
       Effect.gen(function*() {
-        const other = JSON.stringify({ ...KEY, client_email: "other@example-project.iam.gserviceaccount.com" })
+        const other = encodeKeyFile({ ...KEY, client_email: "other@example-project.iam.gserviceaccount.com" })
         const exit = yield* resolve(
           { GOOGLE_SERVICE_ACCOUNT_KEY_FILE: "/a.json", GOOGLE_APPLICATION_CREDENTIALS: "/b.json" },
           { fs: files({ "/a.json": KEY_JSON, "/b.json": other }) }
@@ -134,7 +139,7 @@ describe("Credential.resolve", () => {
     it.effect("prefers the inline key over a key file and never touches the file system", () =>
       Effect.gen(function*() {
         const exit = yield* resolve(
-          { GOOGLE_SERVICE_ACCOUNT_KEY: JSON.stringify(KEY), GOOGLE_SERVICE_ACCOUNT_KEY_FILE: "/a.json" },
+          { GOOGLE_SERVICE_ACCOUNT_KEY: encodeKeyFile(KEY), GOOGLE_SERVICE_ACCOUNT_KEY_FILE: "/a.json" },
           { fs: FileSystem.layerNoop({ readFileString: () => Effect.die("the file system must not be consulted") }) }
         )
         ExitAssert.assertSucceeds(exit, serviceAccount(Option.none()))
@@ -166,8 +171,8 @@ describe("Credential.resolve", () => {
 
     it.effect.each([
       { name: "not JSON", key: "-----BEGIN PRIVATE KEY-----" },
-      { name: "JSON without private_key", key: JSON.stringify({ client_email: KEY.client_email }) },
-      { name: "JSON without client_email", key: JSON.stringify({ private_key: KEY.private_key }) },
+      { name: "JSON without private_key", key: toJson({ client_email: KEY.client_email }) },
+      { name: "JSON without client_email", key: toJson({ private_key: KEY.private_key }) },
       { name: "a JSON array", key: "[]" }
     ])("rejects a key that is $name with the verbatim-storage hint", ({ key }) =>
       Effect.gen(function*() {
@@ -185,7 +190,7 @@ describe("Credential.resolve", () => {
     it.effect("impersonates the configured email", () =>
       Effect.gen(function*() {
         const exit = yield* resolve({
-          GOOGLE_SERVICE_ACCOUNT_KEY: JSON.stringify(KEY),
+          GOOGLE_SERVICE_ACCOUNT_KEY: encodeKeyFile(KEY),
           GOOGLE_IMPERSONATE_USER: "ari@scenesystems.io"
         })
         ExitAssert.assertSucceeds(exit, serviceAccount(Option.some("ari@scenesystems.io")))
@@ -196,7 +201,7 @@ describe("Credential.resolve", () => {
       (value) =>
         Effect.gen(function*() {
           const exit = yield* resolve(
-            { GOOGLE_SERVICE_ACCOUNT_KEY: JSON.stringify(KEY), GOOGLE_IMPERSONATE_USER: value },
+            { GOOGLE_SERVICE_ACCOUNT_KEY: encodeKeyFile(KEY), GOOGLE_IMPERSONATE_USER: value },
             { ampUserEmail: Option.some("ari@scenesystems.io") }
           )
           ExitAssert.assertSucceeds(exit, serviceAccount(Option.some("ari@scenesystems.io")))
@@ -206,7 +211,7 @@ describe("Credential.resolve", () => {
     it.effect("fails when amp-user impersonation is requested but Amp has no signed-in email", () =>
       Effect.gen(function*() {
         const exit = yield* resolve({
-          GOOGLE_SERVICE_ACCOUNT_KEY: JSON.stringify(KEY),
+          GOOGLE_SERVICE_ACCOUNT_KEY: encodeKeyFile(KEY),
           GOOGLE_IMPERSONATE_USER: "amp-user"
         })
         ExitAssert.assertFails(
@@ -228,31 +233,29 @@ describe("Credential.resolve", () => {
         })
         ExitAssert.assertSucceeds(
           exit,
-          {
-            _tag: "OAuthRefresh",
+          Credential.Credential.OAuthRefresh({
             clientId: "client-id.apps.googleusercontent.com",
             clientSecret: Redacted.make("GOCSPX-secret"),
             refreshToken: Redacted.make("1//refresh")
-          } satisfies Credential.OAuthRefresh
+          })
         )
       }))
 
     it.effect("wins over a service account when both are configured", () =>
       Effect.gen(function*() {
         const exit = yield* resolve({
-          GOOGLE_SERVICE_ACCOUNT_KEY: JSON.stringify(KEY),
+          GOOGLE_SERVICE_ACCOUNT_KEY: encodeKeyFile(KEY),
           GOOGLE_OAUTH_CLIENT_ID: "id",
           GOOGLE_OAUTH_CLIENT_SECRET: "secret",
           GOOGLE_OAUTH_REFRESH_TOKEN: "token"
         })
         ExitAssert.assertSucceeds(
           exit,
-          {
-            _tag: "OAuthRefresh",
+          Credential.Credential.OAuthRefresh({
             clientId: "id",
             clientSecret: Redacted.make("secret"),
             refreshToken: Redacted.make("token")
-          } satisfies Credential.OAuthRefresh
+          })
         )
       }))
 
@@ -285,7 +288,7 @@ describe("Credential.resolve", () => {
       Effect.gen(function*() {
         const exit = yield* resolve({
           GOOGLE_OAUTH_REFRESH_TOKEN: "  ",
-          GOOGLE_SERVICE_ACCOUNT_KEY: JSON.stringify(KEY)
+          GOOGLE_SERVICE_ACCOUNT_KEY: encodeKeyFile(KEY)
         })
         ExitAssert.assertSucceeds(exit, serviceAccount(Option.none()))
       }))
@@ -408,7 +411,7 @@ describe("Credential.resolve", () => {
       "fails when $set is set but $missing is missing, even with a key configured",
       ({ missing, record, set }) =>
         Effect.gen(function*() {
-          const exit = yield* resolve({ ...record, GOOGLE_SERVICE_ACCOUNT_KEY: JSON.stringify(KEY) })
+          const exit = yield* resolve({ ...record, GOOGLE_SERVICE_ACCOUNT_KEY: encodeKeyFile(KEY) })
           ExitAssert.assertFails(
             exit,
             new Credential.CredentialError({
@@ -421,7 +424,7 @@ describe("Credential.resolve", () => {
 
     it.effect("wins over a service account key when both are configured", () =>
       Effect.gen(function*() {
-        const exit = yield* resolve({ ...wifEnv, GOOGLE_SERVICE_ACCOUNT_KEY: JSON.stringify(KEY) })
+        const exit = yield* resolve({ ...wifEnv, GOOGLE_SERVICE_ACCOUNT_KEY: encodeKeyFile(KEY) })
         ExitAssert.assertSucceeds(exit, workloadIdentity(Option.none()))
       }))
 
@@ -436,12 +439,11 @@ describe("Credential.resolve", () => {
         })
         ExitAssert.assertSucceeds(
           exit,
-          {
-            _tag: "OAuthRefresh",
+          Credential.Credential.OAuthRefresh({
             clientId: "id",
             clientSecret: Redacted.make("secret"),
             refreshToken: Redacted.make("token")
-          } satisfies Credential.OAuthRefresh
+          })
         )
       }))
 
@@ -575,23 +577,24 @@ describe("Credential.readOnly and scope", () => {
 describe("Credential.ProviderName schema", () => {
   const asserts = new TestSchema.Asserts(Credential.ProviderName)
 
-  it("decodes the canonical name and both audience spellings to the canonical name", async () => {
-    await asserts.decoding().succeed(PROVIDER, PROVIDER)
-    await asserts.decoding().succeed(`//iam.googleapis.com/${PROVIDER}`, PROVIDER)
-    await asserts.decoding().succeed(`https://iam.googleapis.com/${PROVIDER}`, PROVIDER)
-  })
+  it.effect("decodes the canonical name and both audience spellings to the canonical name", () =>
+    Effect.gen(function*() {
+      yield* Effect.promise(() => asserts.decoding().succeed(PROVIDER, PROVIDER))
+      yield* Effect.promise(() => asserts.decoding().succeed(`//iam.googleapis.com/${PROVIDER}`, PROVIDER))
+      yield* Effect.promise(() => asserts.decoding().succeed(`https://iam.googleapis.com/${PROVIDER}`, PROVIDER))
+    }))
 
-  it("rejects other hosts and non-canonical shapes with the documented format", async () => {
-    const expected =
-      "Expected a string matching the RegExp ^projects\\/\\d+\\/locations\\/global\\/workloadIdentityPools\\/[a-z0-9-]+\\/providers\\/[a-z0-9-]+$"
-    await asserts.decoding().fail(`//sts.googleapis.com/${PROVIDER}`, expected)
-    await asserts.decoding().fail("amp-orbs", expected)
-    await asserts.decoding().fail(42, "Expected string")
-  })
+  it.effect("rejects other hosts and non-canonical shapes with the documented format", () =>
+    Effect.gen(function*() {
+      const expected =
+        "Expected a string matching the RegExp ^projects\\/\\d+\\/locations\\/global\\/workloadIdentityPools\\/[a-z0-9-]+\\/providers\\/[a-z0-9-]+$"
+      yield* Effect.promise(() => asserts.decoding().fail(`//sts.googleapis.com/${PROVIDER}`, expected))
+      yield* Effect.promise(() => asserts.decoding().fail("amp-orbs", expected))
+      yield* Effect.promise(() => asserts.decoding().fail(42, "Expected string"))
+    }))
 
-  it("encodes the canonical name unchanged", async () => {
-    await asserts.encoding().succeed(PROVIDER, PROVIDER)
-  })
+  it.effect("encodes the canonical name unchanged", () =>
+    Effect.promise(() => asserts.encoding().succeed(PROVIDER, PROVIDER)))
 })
 
 describe("Credential.oidcAudience and stsAudience", () => {
