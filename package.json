@@ -1,6 +1,5 @@
 {
   "name": "@scenesystems/amp-plugins",
-  "version": "0.0.0",
   "private": true,
   "description": "Reusable Amp plugins built with Effect and Bun: Google Workspace and more.",
   "license": "MIT",

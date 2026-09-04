@@ -1,29 +1,56 @@
 name: Release
 
-# Tag a commit `vX.Y.Z` (or run manually) to publish every built plugin as a GitHub Release asset.
-# Assets are named `<plugin>.zip` without the version so the "latest" URL is stable:
+# A release is a snapshot of this repository: every plugin is built from one commit and published together.
+# Plugins have no versions of their own; the tag and commit recorded in each dist/<plugin>/BUILD identify a build.
+#
+# Two ways to release:
+#   - Run this workflow from `main` (Actions → Release → Run workflow). It mints a calendar tag `vYYYY.MM.DD`
+#     (`vYYYY.MM.DD.N` for further releases the same day), tags the checked-out commit, and publishes.
+#   - Push a tag `v*` yourself, for example `git tag v2026.09.04 && git push origin v2026.09.04`.
+#
+# Assets are named `<plugin>.zip` without the tag so the "latest" URL is stable:
 #   https://github.com/scenesystems/amp-plugins/releases/latest/download/<plugin>.zip
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: Existing tag to (re)publish, e.g. v0.1.0
-        required: true
 
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
-    env:
-      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          fetch-depth: 0 # release notes diff against the previous tag
+      - name: Resolve the release tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            tag="$GITHUB_REF_NAME"
+          else
+            if [[ "$GITHUB_REF_NAME" != "main" ]]; then
+              echo "::error::Manual releases must run from main (got $GITHUB_REF_NAME)"; exit 1
+            fi
+            base="v$(date -u +%Y.%m.%d)"
+            tag="$base"; n=1
+            while git rev-parse -q --verify "refs/tags/$tag" >/dev/null; do tag="$base.$((n++))"; done
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$tag" -m "Release $tag"
+            git push origin "refs/tags/$tag"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Releasing $tag from $(git rev-parse --short=7 HEAD)"
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
@@ -32,6 +59,8 @@ jobs:
           node-version-file: .node-version
       - run: bun install --frozen-lockfile
       - run: bun run ci
+        env:
+          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
       - name: Package plugins
         run: |
           set -euo pipefail
@@ -39,17 +68,47 @@ jobs:
           for dir in dist/*/; do
             name=$(basename "$dir")
             (cd dist && zip -qr "../release/$name.zip" "$name")
-            echo "packaged $name.zip"
+            echo "packaged $name.zip"; cat "$dir/BUILD"
           done
           (cd release && sha256sum *.zip > SHA256SUMS)
           cat release/SHA256SUMS
+      - name: Write release notes
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          prev=$(git describe --tags --abbrev=0 --match 'v*' "$TAG^" 2>/dev/null || true)
+          sha=$(git rev-parse --short=7 HEAD)
+          {
+            echo "Built from [\`$sha\`](https://github.com/$GITHUB_REPOSITORY/commit/$sha)."
+            echo
+            if [[ -z "$prev" ]]; then
+              echo "First release. Plugins: $(ls dist | paste -sd ', ')."
+            else
+              echo "Changes since [$prev](https://github.com/$GITHUB_REPOSITORY/releases/tag/$prev):"
+              echo
+              for dir in dist/*/; do
+                name=$(basename "$dir")
+                files=$(git diff --name-only "$prev" HEAD -- "plugins/$name" | wc -l | tr -d ' ')
+                if [[ "$files" -gt 0 ]]; then echo "- \`$name\`: $files file(s) changed"; else echo "- \`$name\`: unchanged (rebuilt)"; fi
+              done
+              shared=$(git diff --name-only "$prev" HEAD -- packages scripts/build.ts | wc -l | tr -d ' ')
+              if [[ "$shared" -gt 0 ]]; then echo "- shared code (\`packages/\`, build): $shared file(s) changed, affects every bundle"; fi
+            fi
+            echo
+            echo "Install: \`scripts/install-plugin.sh scenesystems/amp-plugins <plugin> <scope> $TAG\` (see README)."
+          } > release/NOTES.md
+          cat release/NOTES.md
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
+          assets=(release/*.zip release/SHA256SUMS)
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" release/* --clobber
+            gh release upload "$TAG" "${assets[@]}" --clobber
           else
-            gh release create "$TAG" release/* --title "$TAG" --generate-notes
+            # --notes is prepended to the generated commit list; --latest keeps the stable "latest" download URL current.
+            gh release create "$TAG" "${assets[@]}" --title "$TAG" --notes "$(cat release/NOTES.md)" --generate-notes --latest
           fi

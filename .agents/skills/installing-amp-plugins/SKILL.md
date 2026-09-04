@@ -40,8 +40,9 @@ script initialises the clone; the remote repository is created on the first push
 If the repository has no releases, build from source instead: clone it, `bun install --frozen-lockfile`,
 `bun run build <plugin>`, and copy `dist/<plugin>/` into the target directory.
 
-Review the installed files (`index.js`, optional `skills/`, `README.md`) before publishing. Plugins execute code;
-only install from repositories the user trusts.
+Review the installed files (`index.js`, `BUILD`, optional `skills/`, `README.md`) before publishing. Plugins execute
+code; only install from repositories the user trusts. `BUILD` names the release tag and source commit the bundle was
+built from; quote it when reporting what was installed or when debugging.
 
 ## 3. Publish and load
 
@@ -67,4 +68,5 @@ workspace plugin). Secrets reach plugins as environment variables after the Amp 
 - Remove: `git -C <clone> rm -r <plugin>`, commit, and confirm before pushing. For `project`/`system`, delete the
   directory and reload plugins.
 - Repository plugins use no `@amp-plugin` directive, so `amp plugins update` does not touch them; updates are
-  explicit reinstalls.
+  explicit reinstalls. Releases are dated snapshots of the source repository (`vYYYY.MM.DD`), not per-plugin
+  versions: compare the installed `BUILD` with the latest release to see whether an update exists.

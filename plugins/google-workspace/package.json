@@ -1,6 +1,5 @@
 {
   "name": "@scenesystems/amp-plugin-google-workspace",
-  "version": "0.1.1",
   "private": true,
   "description": "Amp plugin: search Google Drive, read Docs as Markdown, read/write Sheets, review comments.",
   "license": "MIT",

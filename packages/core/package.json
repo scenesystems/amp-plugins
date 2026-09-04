@@ -1,6 +1,5 @@
 {
   "name": "@scenesystems/amp-plugin-core",
-  "version": "0.0.0",
   "private": true,
   "description": "Effect adapters for the Amp Plugin API: typed tools, services, and runtime wiring.",
   "license": "MIT",

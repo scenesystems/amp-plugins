@@ -1,6 +1,5 @@
 {
   "name": "@scenesystems/amp-plugin-testing",
-  "version": "0.0.0",
   "private": true,
   "description": "Shared test fixtures for Amp plugins written in Effect: exact exit assertions, a recording HttpClient stub, and a fake PluginAPI. Runner: @effect/vitest.",
   "license": "MIT",

@@ -10,7 +10,7 @@
 #                 user       Personal Plugins repository clone (only you)
 #                 project    ./.amp/plugins/ in the current directory
 #                 system     ~/.config/amp/plugins/ (or $XDG_CONFIG_HOME/amp/plugins/)
-#   tag         release tag such as v0.1.0; defaults to the latest release
+#   tag         release tag such as v2026.09.04; defaults to the latest release
 #
 # Downloads the zip and SHA256SUMS, verifies the checksum, unpacks into the target, and for the
 # workspace/user scopes commits the change in the repository clone. It never pushes.
@@ -83,13 +83,16 @@ unzip -q -o "$work/$plugin.zip" -d "$target"
 
 echo "Installed $plugin into $target/$plugin:"
 find "$target/$plugin" -maxdepth 2 -type f | sed "s|^$target/||" | sort
+# BUILD records the release and source commit the bundle was built from (see the repository's scripts/build.ts).
+commit=$(sed -n 's/^commit: //p' "$target/$plugin/BUILD" 2>/dev/null || true)
+build="$tag${commit:+ ($commit)}"
 
 if [[ "$scope" == workspace || "$scope" == user ]]; then
   git -C "$target" add "$plugin"
   if git -C "$target" diff --cached --quiet; then
-    echo "No changes: $plugin at $tag is already installed."
+    echo "No changes: $plugin $build is already installed."
   else
-    git -C "$target" commit -q -m "Install $plugin ($tag) from $repo"
+    git -C "$target" commit -q -m "Install $plugin $build from $repo"
     echo "Committed in $target. Review with: git -C $target show --stat"
     echo "Publish with:  git -C $target push -u origin main   (a $scope push makes it live for its readers)"
   fi

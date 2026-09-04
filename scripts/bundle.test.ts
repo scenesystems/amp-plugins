@@ -60,6 +60,27 @@ describe("dist/google-workspace/index.js", () => {
     expect(existsSync(join(dist, "README.md"))).toBe(true)
   })
 
+  test("records its provenance in BUILD: plugin, release, commit, build time, source URL", () => {
+    const stamp = readFileSync(join(dist, "BUILD"), "utf8")
+    const fields = new Map(
+      stamp.trimEnd().split("\n").map((line): [string, string] => {
+        const index = line.indexOf(": ")
+        return [line.slice(0, index), line.slice(index + 2)]
+      })
+    )
+    const field = (key: string): string => fields.get(key) ?? ""
+    expect([...fields.keys()]).toEqual(["plugin", "release", "commit", "built", "source"])
+    expect(field("plugin")).toBe("google-workspace")
+    expect(field("release")).toMatch(/^(unreleased|v\d{4}\.\d{2}\.\d{2}(\.\d+)?)$/)
+    expect(field("commit")).toMatch(/^([0-9a-f]{7}(-dirty)?|unknown)$/)
+    expect(new Date(field("built")).toISOString()).toBe(field("built"))
+    expect(field("source")).toBe(
+      `https://github.com/scenesystems/amp-plugins/tree/${
+        field("commit").replace(/-dirty$/, "")
+      }/plugins/google-workspace`
+    )
+  })
+
   test("activates: nine tools, the command, the skill, one disposer", async () => {
     const amp = PluginApi.make()
     bundle.default(amp.api)

@@ -53,8 +53,26 @@ variables.
 
 ### Releasing (maintainers)
 
-Tag `main` with `vX.Y.Z` and push the tag. `.github/workflows/release.yml` runs `bun run ci`, zips every
-`dist/<plugin>/`, and attaches the zips plus `SHA256SUMS` to a GitHub Release with generated notes.
+A release is a dated snapshot of this repository: every plugin is built from one commit and published together, and
+no plugin carries a version of its own. Run the **Release** workflow from `main` (Actions → Release → Run workflow); it
+tags the commit `vYYYY.MM.DD` (`vYYYY.MM.DD.N` for a second release that day), runs `bun run ci`, zips every
+`dist/<plugin>/`, and attaches the zips plus `SHA256SUMS` to a GitHub Release whose notes list which plugins changed
+since the previous release. Pushing a `v*` tag by hand does the same for that tag.
+
+Each `dist/<plugin>/BUILD` records the identity of a build:
+
+```
+plugin: google-workspace
+release: v2026.09.04
+commit: 6dd3235
+built: 2026-09-04T17:12:03.118Z
+source: https://github.com/scenesystems/amp-plugins/tree/6dd3235/plugins/google-workspace
+```
+
+The installer quotes it in its commit message ("Install google-workspace v2026.09.04 (6dd3235) from …"), so a
+Workspace Plugins repository's history says exactly which source built what is running. Local builds are stamped
+`unreleased` and `-dirty` when the tree has uncommitted changes. Semver would only be earned if `packages/core` were
+published to npm for others to build against; nothing here is.
 
 ## Develop
 
@@ -150,7 +168,8 @@ we intend to accept. Upgrades arrive as CI-checked pull requests from [Renovate]
 | `typescript`, `oxlint`, `oxlint-tsgolint`, `@effect/tsgo` | exact | `effect-tsgo patch` runs on `bun install` and fails if the versions are not on `@effect/tsgo`'s support table, so they are bumped together in one grouped PR that CI either accepts or rejects.                                |
 | `@ampcode/plugin`                                         | exact | Published daily as `0.0.0-<date>-<sha>` under the `latest` dist-tag. A semver range resolves to the stale `0.0.0-dev` stub (alphanumeric prerelease identifiers sort above numeric ones), so Renovate follows the tag instead. |
 | `effect`                                                  | `^`   | `^4.0.0-rc.N` accepts later release candidates, `4.0.0`, and `4.x`. Release candidates have renamed APIs, so each bump is a PR; Renovate's `rangeStrategy: bump` keeps the range's lower bound at the version actually tested. |
-| `@types/bun`, `dprint`                                    | `^`   | Not coupled to anything.                                                                                                                                                                                                       |
+| `@effect/platform-bun`, `@effect/vitest`                  | exact | Released in lockstep with `effect` (same rc number) and grouped with it, so the three move in one PR.                                                                                                                          |
+| `vitest`, `@types/bun`, `@types/node`, `dprint`           | `^`   | Not coupled to anything. `@types/node` stays on the major in `.node-version`; Node majors are bumped by hand (see Testing).                                                                                                    |
 
 ## Contributing a plugin
 
