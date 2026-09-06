@@ -107,30 +107,75 @@ the `roles/iam.workloadIdentityUser` binding from the service account. There is 
 Use this when someone must act as themselves: files that cannot be shared with a robot, or the
 plugin should see exactly what that person sees. Each person does it once.
 
-1. In the Google Cloud console: APIs & Services → Credentials → **Create credentials → OAuth
-   client ID**, application type **Desktop app**. Note the client id and secret. If the consent
-   screen is in "Testing", add each person as a test user (their refresh tokens then expire after
-   seven days; publish the app to lift that).
-2. Store the client as workspace configuration; it identifies the app, not a person:
+### Personal read-only access, keeping the workspace robot
+
+Leave `GOOGLE_WORKLOAD_IDENTITY_PROVIDER` and `GOOGLE_SERVICE_ACCOUNT_EMAIL` in workspace
+configuration unchanged. Store your OAuth configuration in personal (`--user`) secrets/variables.
+Other members continue using the robot unless they configure their own OAuth token. OAuth accesses
+files as you, without sharing them with the robot; it is not limited to a selected folder.
+
+1. Select the Google Cloud project with the Drive, Docs, and Sheets APIs enabled. In **Google Auth
+   Platform**, configure **Branding** (app name, support email, developer contact) and **Audience**.
+   Choose **Internal** only for users belonging to the project's Google Workspace organization;
+   otherwise choose **External**. For External apps in Testing, add your Google account as a test
+   user. With Drive scopes, External/Testing refresh tokens expire after seven days. Internal apps
+   avoid that testing restriction; production external apps may need verification for Drive's
+   restricted scopes. Publishing does not guarantee tokens never expire or bypass admin policies.
+2. In **Data Access**, configure `https://www.googleapis.com/auth/drive.readonly`. In **Clients →
+   Create client**, select **Desktop app**. Keep its client ID and secret private while setting up;
+   never paste the secret or downloaded client JSON into a thread. A `gcloud auth login` session
+   is not the plugin's OAuth credential.
+3. In the orb Terminal tab (or a local clone), use Bash to enter the client without putting
+   literal credentials in shell history. The client ID is an identifier, not a URL: no `http://`,
+   trailing slash, or embedded spaces. Sign the Amp CLI into your account first.
 
    ```bash
-   printf '%s' '<client-id>' | amp secrets set --workspace GOOGLE_OAUTH_CLIENT_ID --env --data-file -
-   printf '%s' '<client-secret>' | amp secrets set --workspace GOOGLE_OAUTH_CLIENT_SECRET --secret --data-file -
+   read -r -p 'OAuth client ID: ' GOOGLE_OAUTH_CLIENT_ID
+   read -r -s -p 'OAuth client secret: ' GOOGLE_OAUTH_CLIENT_SECRET; printf '\n'
+   export GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET
+   bun run plugins/google-workspace/scripts/oauth-setup.ts --manual --read-only
    ```
 
-3. On a machine with a browser, from a clone of `github.com/scenesystems/amp-plugins`:
+   On a fresh local clone, run `bun install --frozen-lockfile` first; orb setup already installs
+   dependencies. Keep `--read-only`: the helper otherwise requests full Drive access.
+4. Open the printed authorization link in **your normal browser on your own device**, without
+   introducing line breaks. No orb Desktop, public portal, or local CLI installation is needed.
+   After approval, Google redirects to a loopback URL on your device; a connection error is
+   expected. Copy the **complete final address-bar URL**, including `code` and `state`, into the
+   helper's **hidden callback prompt in the orb terminal**, then press Enter. Do not paste it into
+   chat or a shell command. Do not restart the helper or reuse a callback from an earlier run.
+
+   Manual mode validates the callback address and state, uses PKCE, exchanges the code, and saves
+   the client ID, client secret, read-only flag, and refresh token directly to **personal Amp
+   configuration**. Secrets go over the Amp CLI's stdin, not arguments or printed commands. The
+   refresh token is saved last; workspace WIF settings are never changed. A save failure is
+   reported, not silently treated as success; earlier individual saves may already have completed.
+   Once it reports success, clear the client values from your terminal:
 
    ```bash
-   bun install
-   GOOGLE_OAUTH_CLIENT_ID=... GOOGLE_OAUTH_CLIENT_SECRET=... \
-     bun run plugins/google-workspace/scripts/oauth-setup.ts   # add --read-only for the read-only scope
+   unset GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET
    ```
 
-   It opens Google's consent page, receives the redirect on localhost, and prints the
-   `amp secrets set --user GOOGLE_OAUTH_REFRESH_TOKEN --secret ...` command to run.
-4. Run that command. A refresh token is a personal credential: keep it in `--user` secrets, never
-   in workspace or project secrets, and revoke it at https://myaccount.google.com/permissions if it
-   is ever exposed.
+   This still uses a Desktop client's loopback redirect, not Google's deprecated out-of-band
+   redirect. Hidden input prevents terminal echo, not agent access to the shared orb. Revoke the
+   Google app grant at https://myaccount.google.com/permissions if credentials are exposed.
+5. In an existing orb, run `amp orb restart-processes`, then ask Amp to run `gdrive_whoami`.
+   It must report an **OAuth user credential**, your Google email, and **read-only mode**. Read a
+   known document to verify access. No write test is needed.
+
+**Local-browser mode** (without `--manual`): run the helper and browser on the same computer.
+The helper receives the callback automatically and prints a refresh-token storage command.
+That output is secret. Use `--manual` to save directly to Amp without printing the token.
+
+OAuth is selected when `GOOGLE_OAUTH_REFRESH_TOKEN` is present; the matching client ID and secret
+must also be available. Client ID/secret alone do not override the robot. A configured OAuth token
+that is expired, revoked, incomplete, or denied file access produces an error: the plugin never
+silently retries as the service account. To return to the workspace robot, remove your personal
+`GOOGLE_OAUTH_REFRESH_TOKEN` from Amp and restart the orb. Keep the workspace WIF variables intact.
+
+For a team-wide OAuth app, the client ID and client secret may instead be workspace configuration,
+but every person's refresh token must still be personal. The personal read-only flag keeps your
+plugin in read-only mode even if the workspace default later enables writes.
 
 ## 3. Service account key (fallback)
 

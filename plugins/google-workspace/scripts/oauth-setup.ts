@@ -2,20 +2,22 @@
 /**
  * One-time helper to obtain a Google OAuth refresh token for the google-workspace Amp plugin.
  *
- * Run on a machine with a browser, from a clone of github.com/scenesystems/amp-plugins:
+ * Run locally, or use --manual in an orb with a browser on another device:
  *
  *   GOOGLE_OAUTH_CLIENT_ID=... GOOGLE_OAUTH_CLIENT_SECRET=... \
- *     bun run plugins/google-workspace/scripts/oauth-setup.ts [--read-only]
+ *     bun run plugins/google-workspace/scripts/oauth-setup.ts [--read-only] [--manual]
  *
- * Requires an OAuth client of type "Desktop app" (loopback redirect). Prints the refresh token and
- * the `amp secrets set --user ...` command that stores it as a personal secret.
+ * Requires an OAuth client of type "Desktop app" (loopback redirect). Manual mode accepts a hidden
+ * callback URL and saves personal Amp configuration without printing tokens. Local mode prints
+ * the refresh token and the command to store it.
  *
- * This is a developer-machine script, not plugin code, and is not part of the built plugin bundle.
- * It runs a loopback HTTP server on an ephemeral port until Google redirects back with the code,
- * then exchanges the code for tokens.
+ * This setup script runs in a terminal and is not part of the built plugin bundle. It uses a
+ * loopback redirect on an ephemeral port. Local mode receives the callback over HTTP; manual mode
+ * accepts the callback URL through a hidden terminal prompt. Both exchange the code for tokens.
  */
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
+import * as BunTerminal from "@effect/platform-bun/BunTerminal"
 import * as Arr from "effect/Array"
 import * as Cause from "effect/Cause"
 import * as Config from "effect/Config"
@@ -30,6 +32,7 @@ import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
+import * as Prompt from "effect/unstable/cli/Prompt"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
@@ -40,21 +43,10 @@ import * as Url from "effect/unstable/http/Url"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { SCOPE_FULL, SCOPE_READ_ONLY } from "../src/Credential.ts"
-
-class SetupError extends Schema.TaggedError<SetupError>()("SetupError", {
-  message: Schema.String,
-  hint: Schema.optionalKey(Schema.String)
-}) {}
+import { callbackCode, clientId as ClientId, decodeTokenExchange, savePersonal, SetupError } from "./OAuthSetup.ts"
 
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 const TOKEN_URL = "https://oauth2.googleapis.com/token"
-
-const TokenExchange = Schema.Struct({
-  refresh_token: Schema.optionalKey(Schema.Redacted(Schema.String)),
-  error: Schema.optionalKey(Schema.String),
-  error_description: Schema.optionalKey(Schema.String)
-})
-const decodeTokenExchange = Schema.decodeEffect(Schema.fromJsonString(TokenExchange))
 
 /** What Google sends back to the loopback redirect. */
 const Callback = Schema.Struct({
@@ -136,19 +128,32 @@ const loopbackPort = (address: HttpServer.Address): Effect.Effect<number, SetupE
   })
 
 const main = Effect.gen(function*() {
-  const clientId = yield* required("GOOGLE_OAUTH_CLIENT_ID")
+  const clientId = yield* required("GOOGLE_OAUTH_CLIENT_ID").pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(ClientId)),
+    Effect.mapError(() =>
+      new SetupError({
+        message:
+          "GOOGLE_OAUTH_CLIENT_ID must be the bare Google client ID ending in .apps.googleusercontent.com (no URL prefix, slash, or embedded whitespace)."
+      })
+    )
+  )
   const clientSecret = yield* Config.redacted("GOOGLE_OAUTH_CLIENT_SECRET")
   const readOnly = Arr.contains(Bun.argv, "--read-only")
+  const manual = Arr.contains(Bun.argv, "--manual")
   const scope = readOnly ? SCOPE_READ_ONLY : SCOPE_FULL
 
   const crypto = yield* Crypto.Crypto
   const state = Encoding.encodeHex(yield* crypto.randomBytes(16))
+  const verifier = Encoding.encodeBase64Url(yield* crypto.randomBytes(32))
+  const challenge = Encoding.encodeBase64Url(yield* crypto.digest("SHA-256", new TextEncoder().encode(verifier)))
 
   const server = yield* HttpServer.HttpServer
   const port = yield* loopbackPort(server.address)
   const redirectUri = `http://127.0.0.1:${port}/callback`
   const outcome = yield* Deferred.make<string, SetupError>()
-  yield* HttpServer.serveEffect()(callbackHandler(redirectUri, state, outcome))
+  if (!manual) {
+    yield* HttpServer.serveEffect()(callbackHandler(redirectUri, state, outcome))
+  }
 
   const authUrl = Url.setUrlParams(new URL(AUTH_URL), {
     client_id: clientId,
@@ -157,15 +162,29 @@ const main = Effect.gen(function*() {
     scope,
     access_type: "offline",
     prompt: "consent",
-    state
+    state,
+    code_challenge: challenge,
+    code_challenge_method: "S256"
   }).toString()
 
   yield* Console.log("\nOpen this URL in your browser to authorize the plugin:\n")
   yield* Console.log(authUrl)
-  yield* Console.log(`\nWaiting for Google to redirect back to ${redirectUri} ...\n`)
-  yield* openInBrowser(authUrl)
-
-  const code = yield* Deferred.await(outcome)
+  const code = manual
+    ? yield* Effect.gen(function*() {
+      yield* Console.log(
+        "\nUse your normal browser on your own device. After consent, a loopback connection error is expected."
+      )
+      yield* Console.log(
+        "Copy the complete final URL from the address bar into the hidden prompt below. Never paste it into chat."
+      )
+      const callback = yield* Prompt.run(Prompt.hidden({ message: "Callback URL (hidden)" }))
+      return Redacted.value(yield* callbackCode(callback, redirectUri, state))
+    })
+    : yield* Effect.gen(function*() {
+      yield* Console.log(`\nWaiting for Google to redirect back to ${redirectUri} ...\n`)
+      yield* openInBrowser(authUrl)
+      return yield* Deferred.await(outcome)
+    })
 
   const client = yield* HttpClient.HttpClient
   const response = yield* client.execute(
@@ -175,21 +194,40 @@ const main = Effect.gen(function*() {
         client_id: clientId,
         client_secret: Redacted.value(clientSecret),
         redirect_uri: redirectUri,
+        code_verifier: verifier,
         grant_type: "authorization_code"
       })
     )
+  ).pipe(
+    Effect.mapError(() =>
+      new SetupError({ message: "Could not reach Google's token endpoint. Restart setup to retry." })
+    )
   )
-  const token = yield* decodeTokenExchange(yield* response.text)
+  const token = yield* response.text.pipe(
+    Effect.flatMap(decodeTokenExchange),
+    Effect.mapError(() => new SetupError({ message: "Google returned an invalid token response. Restart setup." }))
+  )
   const refreshToken = yield* Option.match(Option.fromNullishOr(token.refresh_token), {
     onSome: (refreshToken) => Effect.succeed(refreshToken),
     onNone: () =>
       new SetupError({
-        message: `Token exchange failed (HTTP ${response.status}): ${token.error ?? "no refresh_token returned"}${
-          token.error_description === undefined ? "" : ` — ${token.error_description}`
-        }`,
+        message: `Token exchange failed (HTTP ${response.status}).`,
         hint: "If no refresh_token was returned, revoke the app at https://myaccount.google.com/permissions and retry."
       })
   })
+
+  if (manual) {
+    yield* savePersonal("GOOGLE_OAUTH_CLIENT_ID", Redacted.make(clientId), "--env")
+    yield* savePersonal("GOOGLE_OAUTH_CLIENT_SECRET", clientSecret, "--secret")
+    yield* savePersonal("GOOGLE_WORKSPACE_READ_ONLY", Redacted.make(readOnly ? "1" : "0"), "--env")
+    // Save the token last: until it exists, workspace WIF remains selected.
+    yield* savePersonal("GOOGLE_OAUTH_REFRESH_TOKEN", refreshToken, "--secret")
+    yield* Console.log(
+      "Saved personal OAuth configuration to Amp. Workspace service-account settings were not changed."
+    )
+    yield* Console.log("Run amp orb restart-processes, then verify your Google email and scope with gdrive_whoami.")
+    return
+  }
 
   yield* Console.log("Success. Store the refresh token as a PERSONAL Amp secret:\n")
   yield* Console.log(
@@ -228,6 +266,7 @@ const report = <E>(cause: Cause.Cause<E>): string =>
 
 const layer = Layer.mergeAll(
   BunHttpServer.layer({ port: 0, hostname: "127.0.0.1" }),
+  BunTerminal.layer,
   FetchHttpClient.layer
 )
 

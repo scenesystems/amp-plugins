@@ -21,7 +21,16 @@ code.
 ## Configuration
 
 Environment variables, supplied by Amp secrets in orbs (personal > project > workspace) or the shell locally. One
-kind must be complete; a partial kind is an error, never a fall-through. Precedence: OAuth → workload identity → key.
+kind must be complete. Precedence: OAuth → workload identity → key. OAuth is selected by a refresh token, not by
+client ID/secret alone; a selected kind's configuration or authentication failure never falls through.
+
+**Read Drive as yourself, without changing the workspace default:** follow the
+[personal read-only OAuth guide](skills/google-workspace/reference/setup.md#personal-read-only-access-keeping-the-workspace-robot).
+Run the helper with `--manual --read-only` in an orb and approve in your normal browser. Paste the final callback into
+its hidden prompt; it saves personal OAuth credentials and `GOOGLE_WORKSPACE_READ_ONLY=1` without printing tokens.
+No orb Desktop or public callback server is needed; workspace WIF stays intact. Your account's Drive access replaces the robot's explicitly shared content for
+your threads. Other members keep using the robot. Remove your personal refresh token and restart to return to it;
+an expired token does not silently switch identities. Files read into threads follow the thread's visibility.
 
 | Variable                                                                             | Kind              | Purpose                                                                                |
 | ------------------------------------------------------------------------------------ | ----------------- | -------------------------------------------------------------------------------------- |

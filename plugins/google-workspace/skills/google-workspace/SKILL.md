@@ -68,7 +68,8 @@ than paraphrasing.
 
 Credentials come from environment variables: Amp secrets in orbs (personal > project > workspace),
 the shell locally. The plugin acts as one Google identity and sees exactly what Drive shares with
-it, so setup is "pick an identity, then share a folder with it". `{baseDir}/reference/setup.md` is
+it: share content with the robot, or use personal OAuth to access what the person can access.
+`{baseDir}/reference/setup.md` is
 the full guide, including the permissions model; the short version:
 
 - **Workload identity** (default): keyless. A Google Cloud admin runs
@@ -77,10 +78,14 @@ the full guide, including the permissions model; the short version:
   `amp secrets set --workspace … --env` commands (`GOOGLE_WORKLOAD_IDENTITY_PROVIDER`,
   `GOOGLE_SERVICE_ACCOUNT_EMAIL`). Orbs prove who they are with `amp orb id-token`; no secret is
   stored anywhere.
-- **OAuth** (per person, works outside orbs): `GOOGLE_OAUTH_CLIENT_ID`/`_SECRET` as workspace
-  values, then each person runs `bun run plugins/google-workspace/scripts/oauth-setup.ts` on a machine
-  with a browser and stores the printed `GOOGLE_OAUTH_REFRESH_TOKEN` as a personal secret. Personal
-  OAuth overrides the workspace's workload identity.
+- **OAuth** (per person, works outside orbs): keep workspace WIF unchanged and store the OAuth
+  client ID, client secret, and refresh token with `--user` (a team's client may instead be shared).
+  In an orb run `bun run plugins/google-workspace/scripts/oauth-setup.ts --manual --read-only`:
+  the user approves in their normal browser, then pastes the final callback URL into the helper's
+  hidden terminal prompt after the expected loopback connection error. It saves personal OAuth
+  and read-only configuration directly, without printing tokens. No orb Desktop needed. Never ask
+  for callback URLs or tokens in chat. Personal OAuth overrides workspace WIF;
+  an OAuth error does not fall back. Remove the personal refresh token and restart to use WIF again.
 - **Service account key** (fallback when federation is forbidden): `google-setup.sh --key file.json`,
   stored as the workspace secret `GOOGLE_SERVICE_ACCOUNT_KEY`.
 - `GOOGLE_IMPERSONATE_USER=<email>|amp-user` makes a robot credential act as a person (domain-wide
