@@ -64,7 +64,7 @@ plugins/google-workspace/scripts/google-setup.sh \
 
 The script is idempotent and prints every step. It enables the APIs, creates the service account
 `amp-google-workspace@<project>.iam.gserviceaccount.com`, creates the pool `amp-orbs` with a
-provider `amp` that trusts `https://ampcode.com/api/workload-identity` and admits only tokens whose
+provider `amp-oidc` that trusts `https://ampcode.com/api/workload-identity` and admits only tokens whose
 `workspace_id` is yours, and grants `roles/iam.workloadIdentityUser` on the service account to that
 workspace. Add `--dry-run` to see the `gcloud` commands first; `--amp-project-id <uuid>` narrows
 trust to one Amp project; `--help` lists everything.
@@ -74,7 +74,7 @@ trust to one Amp project; `--help` lists everything.
 The script ends by printing the two commands, with your values filled in:
 
 ```bash
-printf '%s' 'projects/<number>/locations/global/workloadIdentityPools/amp-orbs/providers/amp' \
+printf '%s' 'projects/<number>/locations/global/workloadIdentityPools/amp-orbs/providers/amp-oidc' \
   | amp secrets set --workspace GOOGLE_WORKLOAD_IDENTITY_PROVIDER --env --data-file -
 printf '%s' 'amp-google-workspace@<project>.iam.gserviceaccount.com' \
   | amp secrets set --workspace GOOGLE_SERVICE_ACCOUNT_EMAIL --env --data-file -

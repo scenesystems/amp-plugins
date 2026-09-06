@@ -7,7 +7,7 @@
 #
 #   1. the Drive, Docs, Sheets, IAM, IAM Credentials, and Security Token Service APIs enabled;
 #   2. a service account (default amp-google-workspace) that owns nothing and holds no key;
-#   3. a workload identity pool (default amp-orbs) with an OIDC provider (default amp) that trusts
+#   3. a workload identity pool (default amp-orbs) with an OIDC provider (default amp-oidc) that trusts
 #      https://ampcode.com/api/workload-identity and admits only tokens from your Amp workspace;
 #   4. an IAM binding that lets every orb in that workspace impersonate the service account.
 #
@@ -23,7 +23,7 @@
 #   --amp-project-id <uuid>     Admit only orbs of this Amp project instead of the whole workspace
 #   --service-account <id>      Service account id (default amp-google-workspace)
 #   --pool <id>                 Workload identity pool id (default amp-orbs)
-#   --provider <id>             Provider id for Amp (default amp)
+#   --provider <id>             Provider id for Amp (default amp-oidc; 4-32 lowercase letters, digits, or hyphens)
 #   --delegation                Also grant roles/iam.serviceAccountTokenCreator so GOOGLE_IMPERSONATE_USER
 #                               works (requires domain-wide delegation in the Google Workspace admin console)
 #   --github-repository <o/r>   Also trust GitHub Actions from one repository (provider `github`) so its
@@ -50,7 +50,7 @@ workspace_id=''
 amp_project_id=''
 service_account='amp-google-workspace'
 pool='amp-orbs'
-provider='amp'
+provider='amp-oidc'
 delegation=false
 github_repository=''
 key_file=''
@@ -81,9 +81,10 @@ done
 [[ -n "$workspace_id" ]] || die "--amp-workspace-id is required"
 [[ "$workspace_id" =~ $UUID_RE ]] || die "--amp-workspace-id must be a UUID, got '$workspace_id'"
 [[ -z "$amp_project_id" || "$amp_project_id" =~ $UUID_RE ]] || die "--amp-project-id must be a UUID, got '$amp_project_id'"
-for pair in "service-account:$service_account" "pool:$pool" "provider:$provider"; do
+for pair in "service-account:$service_account" "pool:$pool"; do
   [[ "${pair#*:}" =~ $ID_RE ]] || die "--${pair%%:*} must be 3-30 lowercase letters, digits, or hyphens, starting with a letter"
 done
+[[ "$provider" =~ ^[a-z0-9-]{4,32}$ ]] || die "--provider must be 4-32 lowercase letters, digits, or hyphens"
 [[ -z "$github_repository" || "$github_repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "--github-repository must be owner/repo"
 command -v gcloud >/dev/null || die "gcloud is not installed; see https://cloud.google.com/sdk/docs/install"
 
