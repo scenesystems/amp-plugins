@@ -78,6 +78,16 @@ published to npm for others to build against; nothing here is.
 
 Requires Bun ≥ 1.3 and Node 24 (`.node-version`; Vitest runs the unit tests on Node).
 
+In Amp orbs, `.agents/setup` installs the Node major from `.node-version`, the Bun version from `package.json`,
+Google Cloud CLI from Google's signed Debian repository, and frozen-lockfile dependencies. Repeat runs reuse installed
+tools and report elapsed time. Node downloads are verified against the official SHA-256 manifest. Tools are installed
+on the standard system PATH so they also work in the Terminal tab and subsequent login shells.
+
+Setup never authenticates to Google or provisions cloud resources: its output can become a shared project snapshot.
+Use `gcloud` interactively only after setup, following the [Google setup instructions](plugins/google-workspace/skills/google-workspace/reference/setup.md).
+An orb's Terminal tab shares its filesystem with the agent; a human login stores credentials in that orb. Prefer a
+workstation for administrative login. The plugin's normal keyless operation does not require a human `gcloud` login.
+
 ```sh
 bun install          # also patches tsc/oxlint with the Effect language service (@effect/tsgo)
 bun run check        # TypeScript 7 (tsgo), all workspace projects

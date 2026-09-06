@@ -1,5 +1,68 @@
 #!/usr/bin/env bash
-# Amp orb setup: install dependencies (also runs `effect-tsgo patch` via the prepare script).
+# Install tools only: setup is snapshotted and must never log in or provision cloud resources.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+sudo_cmd=()
+if [[ $EUID -ne 0 ]]; then
+  sudo_cmd=(sudo -n)
+fi
+scratch=$(mktemp -d)
+trap 'rm -rf "$scratch"' EXIT
+
+echo '== System prerequisites'
+missing=()
+for package in ca-certificates curl gnupg xz-utils unzip; do
+  if [[ $(dpkg-query -W -f='${Status}' "$package" 2>/dev/null || true) != 'install ok installed' ]]; then
+    missing+=("$package")
+  fi
+done
+if [[ ${#missing[@]} -gt 0 ]]; then
+  "${sudo_cmd[@]}" apt-get update
+  "${sudo_cmd[@]}" env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}"
+fi
+
+echo '== Node (.node-version)'
+node_major=$(tr -d '[:space:]' < .node-version)
+if ! command -v node >/dev/null || [[ $(node -p 'process.versions.node.split(".")[0]') != "$node_major" ]]; then
+  case $(uname -m) in
+    x86_64) arch=x64 ;;
+    aarch64) arch=arm64 ;;
+    *) echo 'Unsupported Node architecture' >&2; exit 1 ;;
+  esac
+  node_url="https://nodejs.org/dist/latest-v${node_major}.x"
+  curl -fsSL "$node_url/SHASUMS256.txt" -o "$scratch/SHASUMS256.txt"
+  node_archive=$(awk -v suffix="-linux-${arch}.tar.xz" '$2 ~ (suffix "$") { print $2 }' "$scratch/SHASUMS256.txt")
+  [[ -n "$node_archive" ]]
+  curl -fsSL "$node_url/$node_archive" -o "$scratch/$node_archive"
+  (cd "$scratch"; grep -F " $node_archive" SHASUMS256.txt | sha256sum --check --strict)
+  "${sudo_cmd[@]}" tar -xJf "$scratch/$node_archive" -C /usr/local --strip-components=1 --no-same-owner
+  hash -r
+fi
+node --version
+
+echo '== Bun (package.json packageManager)'
+bun_version=$(node -p 'require("./package.json").packageManager.replace(/^bun@/, "")')
+if ! command -v bun >/dev/null || [[ $(bun --version) != "$bun_version" ]]; then
+  curl -fsSL https://bun.sh/install -o "$scratch/install-bun.sh"
+  "${sudo_cmd[@]}" env BUN_INSTALL=/usr/local PATH="/usr/local/bin:$PATH" bash "$scratch/install-bun.sh" "bun-v$bun_version"
+  hash -r
+fi
+bun --version
+
+echo '== Google Cloud CLI (no authentication)'
+if ! command -v gcloud >/dev/null; then
+  curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg -o "$scratch/google-cloud.gpg"
+  gpg --batch --dearmor --output "$scratch/cloud.google.gpg" "$scratch/google-cloud.gpg"
+  "${sudo_cmd[@]}" install -m 644 "$scratch/cloud.google.gpg" /usr/share/keyrings/cloud.google.gpg
+  printf '%s\n' 'deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main' \
+    | "${sudo_cmd[@]}" tee /etc/apt/sources.list.d/google-cloud-sdk.list >/dev/null
+  "${sudo_cmd[@]}" apt-get update
+  "${sudo_cmd[@]}" env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends google-cloud-cli
+fi
+gcloud --version
+
+echo "== Tools ready (${SECONDS}s); installing locked dependencies"
+# Also runs `effect-tsgo patch` via the prepare script.
 bun install --frozen-lockfile
+echo "== Orb setup complete (${SECONDS}s)"
